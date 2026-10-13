@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from cortaflow.domain.subtitle import Transcript, TranscriptWord
 from cortaflow.infrastructure.certificates import configure_system_certificates
+from cortaflow.infrastructure.paths import extended_length_path
 from cortaflow.services.subtitles import group_words
 
 ProgressCallback = Callable[[dict[str, Any]], None]
@@ -206,7 +207,7 @@ def whisper_model_is_cached(model_cache: Path, model_size: str) -> bool:
     """Return true only for a complete local Faster-Whisper snapshot."""
     if model_size not in SUPPORTED_MODELS:
         return False
-    repository = model_cache / f"models--Systran--faster-whisper-{model_size}" / "snapshots"
+    repository = extended_length_path(model_cache) / f"models--Systran--faster-whisper-{model_size}" / "snapshots"
     if not repository.is_dir():
         return False
     required = {"config.json", "model.bin", "tokenizer.json"}

@@ -144,7 +144,7 @@ class SubtitlesPage(QWidget):
         if not self.source_path:
             QMessageBox.warning(self, "Mídia ausente", "Importe uma mídia antes de transcrever.")
             return
-        model_cache = AppConfig().cache_dir / "models" / "faster-whisper"
+        model_cache = AppConfig().whisper_model_cache
         model_size = str(self.model.currentData())
         allow_download = False
         if not whisper_model_is_cached(model_cache, model_size):

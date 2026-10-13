@@ -381,7 +381,7 @@ class ExportPage(QWidget):
         if not clip or not self.source_path:
             return
         config = AppConfig()
-        preview_dir = config.cache_dir / "previews"
+        preview_dir = config.preview_dir
         preview_dir.mkdir(parents=True, exist_ok=True)
         destination = preview_dir / f"preview-{uuid4().hex}.mp4"
         self._invalidate_preview()

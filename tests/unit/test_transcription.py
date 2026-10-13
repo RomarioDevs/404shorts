@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -142,3 +143,34 @@ def test_cached_model_requires_complete_snapshot(tmp_path: Path) -> None:
     assert whisper_model_is_cached(tmp_path, "small")
     (snapshot / "model.bin").unlink()
     assert not whisper_model_is_cached(tmp_path, "small")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_cache_lookup_supports_long_paths(monkeypatch, tmp_path: Path) -> None:
+    media = tmp_path / "source.mp4"
+    media.write_bytes(b"fixture")
+    cache = tmp_path / ("a" * 80) / ("b" * 80) / "faster-whisper"
+
+    class FakeModel:
+        def __init__(self, _model_size, **kwargs):
+            root = transcription.extended_length_path(Path(kwargs["download_root"]))
+            assert str(root).startswith("\\\\?\\")
+            assert kwargs["local_files_only"] is False
+            repository = root / "models--Systran--faster-whisper-small"
+            blob = repository / "blobs" / ("e" * 40 + ".5a1baf5d.incomplete")
+            assert len(str(blob)) > 260
+            blob.parent.mkdir(parents=True, exist_ok=True)
+            blob.write_bytes(b"fixture")
+            snapshot = repository / "snapshots" / ("f" * 40)
+            snapshot.mkdir(parents=True)
+            blob.replace(snapshot / "model.bin")
+            for name in ("config.json", "tokenizer.json"):
+                (snapshot / name).write_bytes(b"fixture")
+
+        def transcribe(self, _path, **_kwargs):
+            return iter([]), SimpleNamespace(language="pt", language_probability=0.8)
+
+    monkeypatch.setattr(transcription, "WhisperModel", FakeModel)
+    monkeypatch.setattr(transcription, "detect_compute_device", lambda: ("cpu", "int8"))
+    FasterWhisperTranscriber(model_cache=cache, allow_download=True).transcribe(media)
+    assert whisper_model_is_cached(cache, "small")

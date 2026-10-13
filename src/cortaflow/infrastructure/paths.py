@@ -1,11 +1,24 @@
 """Safe filename and path utilities."""
 
+import os
 import re
 import unicodedata
 from pathlib import Path
 
 _INVALID_WINDOWS_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def extended_length_path(path: Path) -> Path:
+    """Allow Windows cache descendants to exceed the legacy MAX_PATH limit."""
+    if os.name != "nt":
+        return path
+    absolute = str(path.expanduser().resolve())
+    if absolute.startswith("\\\\?\\"):
+        return Path(absolute)
+    if absolute.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + absolute[2:])
+    return Path("\\\\?\\" + absolute)
 
 
 def sanitize_filename(value: str, fallback: str = "video") -> str:

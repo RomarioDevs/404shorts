@@ -6,6 +6,8 @@ from pathlib import Path
 from threading import Event
 from typing import Any
 
+from cortaflow.config import AppConfig
+
 from cortaflow.domain.clip import ClipRange
 from cortaflow.domain.editing import AudioSettings, LayerItem, ReframeSettings, SubtitleStyle, TimelineClip
 from cortaflow.domain.project import ExportSettings, ReframeKeyframe
@@ -67,7 +69,9 @@ def render_project_export(
     effective_audio = audio_settings or AudioSettings(normalize=settings.normalize_audio)
     resolution = output_dimensions(settings, effective_reframe, source_size, preview)
 
-    with tempfile.TemporaryDirectory(prefix="cortaflow-export-", dir=destination.parent) as temp_dir:
+    temp_root = AppConfig().render_temp_dir
+    temp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="export-", dir=temp_root) as temp_dir:
         subtitle_path = None
         if timeline_clips:
             output_cues, output_words = _timeline_subtitle_track(

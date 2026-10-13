@@ -8,4 +8,4 @@ build/
 *.spec
 runtime-data/*
 !runtime-data/.gitkeep
-
+comandos.txt

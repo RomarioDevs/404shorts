@@ -274,7 +274,7 @@ class MainWindow(QMainWindow):
                 "Importe ou baixe uma mídia autorizada antes de criar cortes automaticamente.",
             )
             return
-        model_cache = AppConfig().cache_dir / "models" / "faster-whisper"
+        model_cache = AppConfig().whisper_model_cache
         transcriber = None
         if self.project.transcript is None:
             model_size = str(self.subtitles_page.model.currentData())
@@ -314,7 +314,7 @@ class MainWindow(QMainWindow):
             ranker,
             transcriber,
             face_model,
-            AppConfig().cache_dir / "previews",
+            AppConfig().preview_dir,
             self.project.export,
             self.project.subtitle_style,
             self.project.reframe_settings,
