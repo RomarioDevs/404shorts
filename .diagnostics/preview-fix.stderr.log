@@ -1,0 +1,9 @@
+2026-09-11 08:36:46,915 | INFO | __main__ | Aplicação iniciada
+2026-09-11 08:37:33,214 | INFO | faster_whisper | Processing audio with duration 04:52.409
+2026-09-11 08:37:33,814 | INFO | faster_whisper | VAD filter removed 00:32.649 of audio
+2026-09-11 08:37:35,779 | INFO | faster_whisper | Detected language 'pt' with probability 0.96
+2026-09-11 08:38:43,139 | INFO | pyscenedetect | Detecting scenes...
+2026-09-11 08:57:54,930 | INFO | faster_whisper | Processing audio with duration 13:25.082
+2026-09-11 08:57:56,492 | INFO | faster_whisper | VAD filter removed 00:38.682 of audio
+2026-09-11 08:57:58,476 | INFO | faster_whisper | Detected language 'pt' with probability 0.92
+2026-09-11 09:01:40,566 | INFO | pyscenedetect | Detecting scenes...
