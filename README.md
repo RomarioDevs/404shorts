@@ -1,115 +1,110 @@
 # CortaFlow AI
 
-Aplicativo desktop local para transformar vídeos autorizados em cortes verticais. A interface é feita com Qt Widgets/PySide6; FFmpeg executa os cortes e a renderização; Faster-Whisper, PySceneDetect, MediaPipe, OpenCV e PyAV fazem as análises locais.
+Aplicativo desktop local para analisar vídeos autorizados, sugerir trechos e exportá-los em formato vertical com legendas. A interface usa PySide6 e o processamento de mídia usa FFmpeg, Faster-Whisper, PySceneDetect, MediaPipe, OpenCV e PyAV.
 
-## Estado do projeto
+## Instalar em um computador Windows novo
 
-As Fases 0 a 9 do plano foram implementadas e testadas. A Fase 10 cobre testes e documentação. O build do executável e o instalador estão deliberadamente suspensos por orientação do usuário: nenhum empacotamento foi executado ou validado nesta etapa.
+O projeto é executado a partir do código-fonte. O `instalar.bat` prepara as dependências e inicia o aplicativo; ele não cria um instalador independente nem baixa uma cópia do código-fonte.
 
-O plano corretivo aprovado na auditoria de cortes automáticos também foi concluído na ordem A → D → B → C → E. Ele acrescentou o fluxo automático de um clique, seleção configurável entre 5 e 179 segundos, ranking semântico local opcional, correções de legenda/render e avaliação reproduzível de qualidade. Nenhum build foi gerado durante esse trabalho.
+### O que o computador precisa
 
-Recursos disponíveis:
-
-- importação local e consulta/download de URL autorizada com confirmação;
-- player, marcação de entrada/saída e linha do tempo com sete faixas;
-- transcrição com timestamps por palavra e fallback automático de CUDA para CPU;
-- edição e exportação de legendas JSON, SRT e ASS;
-- detecção de cenas, silêncios, rostos e sugestões de cortes;
-- botão **Gerar cortes sugeridos**, que executa obtenção → transcrição → cenas/voz → rostos/falante → validação do enquadramento → ranking → legenda → versão vertical de cada resultado;
-- ranking híbrido: pré-filtro multimodal determinístico, Qwen3-4B local pelo Ollama e fallback heurístico sem perda dos resultados;
-- durações mínima, preferida e máxima configuráveis entre 5 e 179 segundos, quantidade de resultados e aceitação automática por nota;
-- marca-d'água opcional com PNG, WebP, JPG ou BMP válido, posicionável por arrastar e redimensionar diretamente sobre a prévia vertical, além de dez posições, tamanho, transparência e margem;
-- enquadramento vertical automático, falante ativo e correção por keyframes manuais;
-- editor com propriedades, atalhos, desfazer/refazer e estilos persistidos no projeto;
-- prévia obrigatória, fila sequencial, cancelamento, NVENC e fallback para `libx264`;
-- projetos JSON portáteis, autosave, recuperação e histórico/fila/configurações em SQLite.
-
-## Requisitos
+**Obrigatório para instalar e abrir:**
 
 - Windows 10 ou 11 de 64 bits;
-- CPython 3.11 de 64 bits;
-- FFmpeg e FFprobe 8.1 ou compatíveis, acessíveis pelo `PATH` ou instalados pelo pacote oficial do WinGet usado no ambiente validado;
-- build do FFmpeg com `libass`, H.264 (`libx264`) e AAC;
-- NVIDIA CUDA 12 e cuDNN 9 para transcrição por GPU com as versões atuais do CTranslate2; sem isso, o aplicativo usa CPU;
-- arquivo oficial `.task` do MediaPipe já existente no computador; o aplicativo o localiza automaticamente e ainda permite seleção manual;
-- opcionalmente, Ollama já instalado e em execução com o modelo local `cortaflow-qwen3:4b`; se não estiver disponível, o ranking heurístico continua funcionando.
+- conexão com a internet durante a instalação;
+- WinGet (Aplicativo Instalador de Aplicativos / App Installer, disponível pela Microsoft Store);
+- a pasta completa deste projeto, obtida por clone do Git ou download do ZIP do repositório;
+- espaço livre em disco para Python, dependências, modelos de transcrição e arquivos de vídeo. Recomenda-se pelo menos 10 GB livres; modelos e vídeos podem exigir mais.
 
-O Qt for Python recomenda um ambiente virtual e Python oficial. O Faster-Whisper atual requer Python 3.9 ou superior e, para GPU, cuBLAS/CUDA 12 e cuDNN 9. Consulte as fontes oficiais: [Qt for Python](https://doc.qt.io/qtforpython-6/gettingstarted.html), [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper), [FFmpeg](https://ffmpeg.org/documentation.html) e [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker).
+O BAT instala CPython 3.11 x64 e FFmpeg Essentials pelo WinGet, cria `.venv`, instala o projeto e suas dependências e abre o aplicativo. Na primeira instalação, o `pip` baixa várias bibliotecas Python; mantenha a conexão com a internet ativa. Se o Windows pedir autorização para instalar algum componente, confirme com uma conta que possa instalar programas.
 
-## Preparação e execução
+### Passo a passo
 
-No PowerShell, a partir da raiz do projeto:
+1. Instale o **Git para Windows**, se ainda não tiver, ou baixe o ZIP do repositório e extraia-o. O Git só é necessário para clonar; para obter o código, use um dos métodos:
+
+   ```powershell
+   git clone https://github.com/RomarioSantos-Oficial/404shorts.git
+   ```
+
+2. Abra a pasta `404shorts` extraída/clonada. Confirme que nela aparecem `instalar.bat`, `pyproject.toml` e a pasta `scripts`.
+3. Dê duplo clique em **`instalar.bat`**. O Windows poderá pedir confirmação para abrir o arquivo; autorize depois de confirmar que veio deste repositório.
+4. Aguarde as instalações. Não feche a janela: ela informa se alguma etapa falhar. Ao concluir, o CortaFlow AI inicia.
+5. Nas próximas vezes, inicie pelo `iniciar.bat` ou pelo comando abaixo na pasta do projeto:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m cortaflow.main
+   ```
+
+Se o WinGet não existir, atualize/instale **App Installer** pela Microsoft Store e execute novamente. Se baixou o ZIP, não mova nem apague a pasta do projeto antes de terminar a instalação.
+
+### Inicialização rápida por script
+
+O `instalar.bat` pode ser executado novamente com segurança: reutiliza o ambiente virtual existente, instala/atualiza dependências necessárias e inicia o programa. Para apenas criar ou reparar o ambiente sem abrir a interface, execute no PowerShell, na pasta do projeto:
 
 ```powershell
 .\scripts\setup_windows.ps1
-.\.venv\Scripts\python.exe -m cortaflow.main
 ```
 
-O script usa somente o Python 3.11 local, cria `.venv` quando necessário e instala o projeto em modo editável. Para conferir o ambiente sem alterar arquivos:
+Para diagnosticar dependências já instaladas:
 
 ```powershell
 .\scripts\check_environment.ps1
 ```
 
-O aplicativo não baixa modelos silenciosamente. Se um modelo Faster-Whisper ou semântico não estiver no cache, a interface pede autorização explícita antes de qualquer obtenção oficial. Os modelos ficam no cache do usuário e não são incorporados ao código-fonte. O Ollama existente é consultado somente em `127.0.0.1`; o CortaFlow não executa `ollama pull`.
+## Requisitos opcionais
 
-## Fluxo de uso
+- **GPU NVIDIA:** não é necessária. A transcrição usa CPU quando CUDA/cuDNN compatíveis não estão disponíveis. Para aceleração, é necessária GPU NVIDIA com drivers e bibliotecas CUDA 12/cuDNN 9 compatíveis com CTranslate2.
+- **Ollama e modelo `cortaflow-qwen3:4b`:** opcionais, para classificação semântica local mais avançada. Sem eles, o ranking heurístico continua disponível. O CortaFlow não instala Ollama nem baixa esse modelo automaticamente.
+- **Modelo facial MediaPipe `.task`:** necessário para algumas funções de detecção/rastreamento de rostos e validação de enquadramento. Obtenha o modelo Face Landmarker de uma fonte oficial do MediaPipe e selecione-o na página **Analisar**, caso o programa não o encontre localmente. O projeto não baixa o arquivo automaticamente.
+- **Conteúdo de vídeo:** use arquivos locais ou links para conteúdo que você tenha direito de usar. A análise de links autorizados depende de conexão com a internet.
 
-Para o fluxo rápido, importe a mídia e clique em **Gerar cortes sugeridos**. A tela **Cortes sugeridos** abre imediatamente e mostra a etapa em andamento. Antes de renderizar, cada intervalo recebe verificação do rosto principal/falante em amostras de 250 ms, inclusive nas trocas de pessoa e câmera. Depois, o próprio MP4 vertical pronto é analisado novamente: a versão só recebe `Legenda + rosto conferido` quando o rosto completo e centralizado foi confirmado no arquivo renderizado. A coluna **Enquadramento** informa `Validado`, `Sem rosto · centro` ou `Revisar`; um resultado inseguro não pode ser aceito em lote. Selecione uma linha e use **Assistir corte**: primeiro é mostrado temporariamente o intervalo original e depois a versão vertical com legenda. Todas as sugestões solicitadas recebem versão vertical no cache. Use **Anterior** e **Próximo** para revisar uma por vez.
+Os modelos Faster-Whisper são baixados apenas após confirmação explícita na interface quando ainda não estiverem em cache. Reserve espaço e tempo adicionais para esse primeiro download.
 
-Na própria página **Cortes sugeridos**, a área **Editar e salvar** mantém exatamente o início/fim do resultado selecionado. Nela é possível corrigir a legenda, abrir o mesmo intervalo no Editor completo e arrastar/redimensionar uma marca-d'água válida. A marca é posicionada dentro da área real do vídeo, sem usar as barras pretas do player; ao concluir a prévia, o estado confirma que ela foi gravada no MP4. **Atualizar prévia após ajustes** é opcional para conferir o resultado; **Salvar este corte** e o botão superior **Salvar cortes** gravam diretamente o corte aberto com as configurações atuais, sem exigir aceitação da lista. A aceitação continua necessária somente para operações em lote. **Editar e salvar aceitos em lote** permanece no mesmo espaço. Não existe mais uma aba lateral Exportar duplicando esse fluxo.
+## Como usar
 
-No editor incorporado em **Cortes sugeridos**, `1080 × 1920 · máxima` gera o maior formato vertical oferecido pelo aplicativo. A qualidade real continua limitada pelo vídeo original; ampliar uma fonte pequena não cria detalhes novos. No campo **Qualidade**, números menores preservam mais qualidade, mas aumentam o arquivo. Qualquer correção de legenda ou mudança na imagem, posição, tamanho ou transparência da marca-d'água invalida a aprovação anterior e exige uma nova prévia.
+### Fluxo automático (recomendado para começar)
 
-Para controle etapa a etapa:
+1. Na página **Importar**, clique em **Importar arquivo local** e escolha um vídeo. Também é possível analisar uma URL autorizada e confirmar o download.
+2. Clique em **Gerar cortes sugeridos**. O programa prepara a mídia, transcreve a fala e analisa áudio, cenas, rostos e enquadramento. Na primeira execução, autorize o download do modelo de transcrição quando solicitado.
+3. A página **Cortes sugeridos** mostra o andamento e os resultados. Selecione um resultado e clique **Assistir corte** para conferir o trecho original e a versão vertical com legenda.
+4. Revise a legenda e o enquadramento. Se necessário, ajuste o texto e a marca-d'água em **Editar e salvar**. Resultados marcados para revisão devem ser conferidos antes de aceitar ou exportar.
+5. Clique em **Salvar este corte** para exportar o resultado selecionado. Para operações em lote, aceite os resultados desejados e use o comando de salvar cortes. Escolha uma pasta de saída.
+6. Salve o projeto como `*.cortaflow.json` para continuar depois. A página **Histórico** permite reabrir projetos recentes; o autosave oferece recuperação se houver uma interrupção.
 
-1. Em **Importar**, selecione um arquivo local ou analise uma URL autorizada.
-2. Em **Legendas**, escolha idioma/modelo, transcreva e revise o texto.
-3. Em **Analisar**, detecte cenas, silêncios, rostos e falante ativo.
-4. Em **Cortes sugeridos**, assista, aceite/rejeite ou abra **Editar e salvar**.
-5. Em **Editor completo**, ajuste a linha do tempo ou keyframes manuais quando necessário.
-6. Volte a **Cortes sugeridos**, atualize a prévia, aprove e escolha a pasta.
-7. Salve o projeto como `*.cortaflow.json`. A aba **Histórico** permite reabri-lo.
+### Fluxo manual, etapa por etapa
 
-O autosave é escrito ao lado do projeto com o sufixo `.autosave`. Ao abrir um projeto cuja cópia automática seja mais recente, o programa oferece a recuperação.
+1. **Importar:** adicione o vídeo ou analise uma URL autorizada.
+2. **Legendas:** escolha o idioma/modelo, transcreva e corrija o texto. As legendas podem ser exportadas nos formatos disponíveis pela página.
+3. **Analisar:** detecte cenas, silêncios, rostos e falante ativo. O falante é uma estimativa; corrija manualmente se necessário.
+4. **Cortes sugeridos:** assista, aceite/rejeite e escolha os intervalos que deseja editar ou exportar.
+5. **Editor completo:** ajuste a linha do tempo, o enquadramento/keyframes e outros elementos quando necessário.
+6. **Cortes sugeridos:** revise a prévia atualizada e salve um corte ou os aceitos em lote.
+7. Salve o projeto `.cortaflow.json` para reabrir o trabalho depois.
 
-## Dados locais
+## Arquivos e dados
 
-Os diretórios reais são exibidos em **Configurações** e seguem `platformdirs`:
+Os projetos e exportações ficam nos locais escolhidos pelo usuário. O aplicativo também mantém dados locais do usuário:
 
-- dados: banco `cortaflow.db` com histórico, configurações e estados da fila;
+- banco `cortaflow.db`: histórico, preferências e estado da fila;
 - cache: modelos e prévias temporárias;
-- logs: diagnósticos locais sem cookies ou tokens.
+- logs: informações locais para diagnóstico.
 
-Mídias, áudio e caixas faciais não são enviados a serviços externos pelo pipeline de análise. O sistema usa identificadores temporários de rosto e não faz reconhecimento de identidade.
-
-## Testes
-
-Execute a suíte completa:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m pip check
-```
-
-As fixtures são locais e legalmente controladas; os testes não dependem de vídeos aleatórios da internet. A avaliação gera dez vídeos sintéticos redistribuíveis, incluindo podcast com dois participantes, aula, entrevista, vídeo sem fala e pouca luz, e mede precisão contra cortes humanos, diversidade, fala cortada e legibilidade. Há também cobertura para caminhos com espaços e acentos, falta de CUDA/FFmpeg, persistência, cancelamento e renderização real com FFmpeg.
+Os caminhos são mostrados em **Configurações**. O pipeline de análise processa mídia localmente; não envia vídeo, áudio ou caixas faciais a serviços externos. Não há reconhecimento de identidade facial.
 
 ## Solução de problemas
 
-- **FFmpeg não encontrado:** execute `ffmpeg -version` e `ffprobe -version`. Reabra o terminal após instalar pelo WinGet.
-- **CUDA/cuDNN indisponível:** a transcrição tenta CPU automaticamente. A GPU exige versões compatíveis das bibliotecas NVIDIA no `PATH`.
-- **Modelo facial ausente:** selecione manualmente um arquivo `.task` oficial do MediaPipe; quando ele já está no cache/auditoria local, o aplicativo o preenche automaticamente. O projeto não baixa executáveis ou modelos de fontes desconhecidas.
-- **Exportação mostra `out_time=N/A`:** alguns codecs, especialmente no início do AV1/Opus, não informam tempo imediatamente. O aplicativo trata esse valor como 0% até chegar o primeiro timestamp válido.
-- **Ollama/modelo semântico indisponível:** mantenha o Ollama local em execução e registre o GGUF verificado como `cortaflow-qwen3:4b`; sem ele, escolha o modo heurístico. Nenhum modelo é puxado automaticamente.
-- **Arquivo final já existe:** escolha outro destino. O renderizador não sobrescreve a saída silenciosamente.
-- **Falha durante exportação:** a saída é criada em arquivo temporário e só é renomeada após sucesso. A tarefa interrompida fica registrada como falha para não parecer concluída.
-- **Interface sem vídeo:** confirme que o formato possui decodificador compatível no Qt/FFmpeg e use o diagnóstico do ambiente.
+- **`winget` não encontrado:** instale/atualize o App Installer na Microsoft Store, feche e reabra o terminal e execute `instalar.bat` novamente.
+- **Python 3.11 não encontrado:** confira se o launcher Python (`py`) está instalado. Em um terminal novo, `py -3.11 --version` deve mostrar Python 3.11.
+- **`ffmpeg` não encontrado:** execute `winget install --id Gyan.FFmpeg.Essentials -e`; depois feche e reabra o terminal. O pacote instala FFmpeg e FFprobe.
+- **Instalação Python falhou:** confira a conexão, espaço livre e a mensagem do `pip`. Para reparar, execute novamente `instalar.bat`.
+- **Transcrição lenta:** a CPU funciona sem configuração extra, mas pode ser mais lenta. CUDA/cuDNN são opcionais e dependem de hardware e versões compatíveis.
+- **Modelo facial ausente:** selecione o arquivo `.task` oficial do MediaPipe Face Landmarker em **Analisar**. A ausência pode impedir recursos que dependem de detecção facial.
+- **Ollama/modelo semântico indisponível:** o ranking heurístico continua funcionando; o Ollama e o modelo `cortaflow-qwen3:4b` são opcionais.
+- **Arquivo final já existe:** escolha outro destino; o renderizador não sobrescreve a saída silenciosamente.
+- **Falha ao exportar:** confira o espaço livre, os logs locais e se o formato de vídeo é compatível.
 
 ## Segurança, licenças e limitações
 
-Use apenas conteúdo próprio, licenciado ou autorizado. O aplicativo não contorna DRM, paywalls, vídeos privados ou controles de acesso e não importa cookies do navegador. Processos externos recebem argumentos separados e usam `shell=False`.
+Use apenas conteúdo próprio, licenciado ou autorizado. O aplicativo não contorna DRM, paywalls, vídeos privados ou controles de acesso, e não importa cookies do navegador. FFmpeg, modelos e outros componentes de terceiros são instalados separadamente e seguem as licenças próprias; consulte [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) e as [condições legais do FFmpeg](https://ffmpeg.org/legal.html).
 
-O falante ativo é uma estimativa probabilística baseada em movimento de boca, energia e VAD; a correção manual tem prioridade. FFmpeg, fontes e modelos não são distribuídos neste repositório. Antes de qualquer distribuição futura, revise [as condições legais do FFmpeg](https://ffmpeg.org/legal.html), as obrigações do Qt/PySide6 e o arquivo [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-O script `scripts/build_windows.ps1` permanece somente como preparação para uma etapa futura autorizada. Ele não foi executado nesta validação.
-#
+O falante ativo é uma estimativa baseada em movimento de boca, energia e detecção de voz; a correção manual tem prioridade. A qualidade de saída também depende da qualidade e resolução do vídeo de origem.
