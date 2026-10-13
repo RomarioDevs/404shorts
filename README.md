@@ -1,4 +1,4 @@
-[# CortaFlow AI
+# CortaFlow AI
 
 Aplicativo desktop local para transformar vídeos autorizados em cortes verticais. A interface é feita com Qt Widgets/PySide6; FFmpeg executa os cortes e a renderização; Faster-Whisper, PySceneDetect, MediaPipe, OpenCV e PyAV fazem as análises locais.
 
@@ -112,6 +112,4 @@ Use apenas conteúdo próprio, licenciado ou autorizado. O aplicativo não conto
 O falante ativo é uma estimativa probabilística baseada em movimento de boca, energia e VAD; a correção manual tem prioridade. FFmpeg, fontes e modelos não são distribuídos neste repositório. Antes de qualquer distribuição futura, revise [as condições legais do FFmpeg](https://ffmpeg.org/legal.html), as obrigações do Qt/PySide6 e o arquivo [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 O script `scripts/build_windows.ps1` permanece somente como preparação para uma etapa futura autorizada. Ele não foi executado nesta validação.
-#   4 0 4 s h o r t s 
- 
- ](https://github.com/RomarioSantos-Oficial/404shorts)
+#
