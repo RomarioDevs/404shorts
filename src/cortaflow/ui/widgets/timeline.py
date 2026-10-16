@@ -362,12 +362,19 @@ class TimelineWidget(QWidget):
         down_button.clicked.connect(lambda: self.canvas.move_track(TRACKS[self.track_selector.currentIndex()][0], 1))
         toolbar.addWidget(up_button)
         toolbar.addWidget(down_button)
+        clear_button = QPushButton("Limpar seleção")
+        clear_button.setToolTip("Desmarcar todos os clipes")
+        clear_button.clicked.connect(self._clear_selection)
+        toolbar.addWidget(clear_button)
         toolbar.addWidget(QLabel("Zoom"))
         self.zoom = QSlider(Qt.Orientation.Horizontal)
         self.zoom.setRange(20, 200)
         self.zoom.setValue(60)
         self.zoom.setMaximumWidth(160)
         toolbar.addWidget(self.zoom)
+        self.zoom_label = QLabel("60 px/s")
+        self.zoom_label.setMinimumWidth(48)
+        toolbar.addWidget(self.zoom_label)
         layout.addLayout(toolbar)
         self.canvas = TimelineCanvas()
         self.canvas.seek_requested.connect(self.seek_requested)
@@ -376,6 +383,7 @@ class TimelineWidget(QWidget):
         self.canvas.clip_move_requested.connect(self.clip_move_requested)
         self.canvas.clip_trim_requested.connect(self.clip_trim_requested)
         self.zoom.valueChanged.connect(self.canvas.set_zoom)
+        self.zoom.valueChanged.connect(lambda value: self.zoom_label.setText(f"{value} px/s"))
         self.scroll = QScrollArea()
         self.scroll.setWidget(self.canvas)
         self.scroll.setWidgetResizable(True)
@@ -408,4 +416,10 @@ class TimelineWidget(QWidget):
     def select_clips(self, clip_ids: list[str]) -> None:
         self.canvas.selected_clip_ids = set(clip_ids)
         self.canvas.selected_clip_id = clip_ids[-1] if clip_ids else None
+        self.canvas.update()
+
+    def _clear_selection(self) -> None:
+        self.canvas.selected_clip_ids.clear()
+        self.canvas.selected_clip_id = None
+        self.canvas.selection_changed.emit([])
         self.canvas.update()

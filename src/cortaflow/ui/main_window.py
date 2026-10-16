@@ -901,6 +901,12 @@ class MainWindow(QMainWindow):
             #editorEmptyState { color: #7f899c; font-size: 11px; padding: 16px; }
 
             #editorHeader { min-height: 52px; }
+            #editorActionStrip { background: #1b1e27; border: 1px solid #292f3b; border-radius: 8px; }
+            #editorActionStrip QLabel { color: #7f899c; font-size: 10px; font-weight: 800; letter-spacing: 1px; }
+            #editorQuickAction { background: #252a35; border: 1px solid #353d4c; border-radius: 5px;
+                color: #dce1ec; padding: 5px 10px; font-size: 11px; }
+            #editorQuickAction:hover { background: #343b4b; border-color: #7168e9; color: #ffffff; }
+            #editorSelectionLabel { color: #aeb7c7; font-size: 11px; }
             #editorHeader QLabel, #previewHeader QLabel, #transportHeader QLabel,
             #timelineHeader QLabel, #inspectorHeader QLabel { color: #aeb7c7; }
             #editorSectionTitle { color: #f5f7fb; font-size: 16px; font-weight: 700; }
@@ -912,6 +918,9 @@ class MainWindow(QMainWindow):
             #previewSurface { background: #08090c; border: 1px solid #2c3340; border-radius: 8px; }
             #editorTimeline { background: #171a21; border: 1px solid #292f3b; border-radius: 8px; }
             #timelineWorkspace { background: #15171b; border: 1px solid #292d33; border-radius: 8px; }
+            #editorTimeline QCheckBox { color: #9ca5b6; font-size: 10px; spacing: 3px; }
+            #editorTimeline QComboBox { padding: 3px 5px; min-width: 86px; }
+            #editorTimeline QPushButton { padding: 3px 7px; min-width: 24px; }
             #propertiesColumn { background: #171a21; border: 1px solid #292f3b; border-radius: 8px; }
             #editorInspector { background: #171a21; border: 0; }
             #editorToolRail { background: #1b1e27; border: 1px solid #292f3b; border-radius: 10px; }
