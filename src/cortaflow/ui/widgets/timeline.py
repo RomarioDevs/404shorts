@@ -24,6 +24,7 @@ TRACKS = (
 class TimelineCanvas(QWidget):
     seek_requested = Signal(int)
     clip_selected = Signal(str)
+    selection_changed = Signal(object)
     clip_move_requested = Signal(str, int)
     clip_trim_requested = Signal(str, str, int)
     track_left = 104
@@ -40,6 +41,7 @@ class TimelineCanvas(QWidget):
         self.clips: list[TimelineClip] = []
         self.track_items: dict[str, list[Any]] = {name: [] for name, _, _ in TRACKS}
         self.selected_clip_id: str | None = None
+        self.selected_clip_ids: set[str] = set()
         self._drag_clip_id: str | None = None
         self._drag_offset_ms = 0
         self._trim_side: str | None = None
@@ -86,6 +88,7 @@ class TimelineCanvas(QWidget):
 
     def select_clip(self, clip_id: str | None) -> None:
         self.selected_clip_id = clip_id
+        self.selected_clip_ids = {clip_id} if clip_id else set()
         self.update()
 
     def position_to_x(self, position_ms: int) -> float:
@@ -101,7 +104,15 @@ class TimelineCanvas(QWidget):
         position = self.x_to_position(event.position().x())
         clip = self._clip_at(event.position().x(), event.position().y())
         if clip:
+            additive = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            if additive and clip.clip_id in self.selected_clip_ids:
+                self.selected_clip_ids.remove(clip.clip_id)
+            elif additive:
+                self.selected_clip_ids.add(clip.clip_id)
+            else:
+                self.selected_clip_ids = {clip.clip_id}
             self.selected_clip_id = clip.clip_id
+            self.selection_changed.emit(sorted(self.selected_clip_ids))
             left_x = self.position_to_x(clip.timeline_start_ms)
             right_x = self.position_to_x(clip.timeline_end_ms)
             if abs(event.position().x() - left_x) <= 9:
@@ -116,6 +127,10 @@ class TimelineCanvas(QWidget):
                 self._drag_offset_ms = position - clip.timeline_start_ms
             self.clip_selected.emit(clip.clip_id)
             self.update()
+        elif not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.selected_clip_id = None
+            self.selected_clip_ids.clear()
+            self.selection_changed.emit([])
         self.seek_requested.emit(position)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
@@ -176,7 +191,7 @@ class TimelineCanvas(QWidget):
                 max(3, self.position_to_x(end) - self.position_to_x(start)),
                 self.track_height - 10,
             )
-            selected = isinstance(item, TimelineClip) and item.clip_id == self.selected_clip_id
+            selected = isinstance(item, TimelineClip) and item.clip_id in self.selected_clip_ids
             painter.fillRect(rect, color.lighter(125) if selected else color)
             painter.setPen(QPen(QColor("#f5f7ff") if selected else QColor("#c5cad5"), 2 if selected else 1))
             painter.drawRect(rect)
@@ -232,6 +247,7 @@ class TimelineCanvas(QWidget):
 class TimelineWidget(QWidget):
     seek_requested = Signal(int)
     clip_selected = Signal(str)
+    selection_changed = Signal(object)
     clip_move_requested = Signal(str, int)
     clip_trim_requested = Signal(str, str, int)
 
@@ -253,6 +269,7 @@ class TimelineWidget(QWidget):
         self.canvas = TimelineCanvas()
         self.canvas.seek_requested.connect(self.seek_requested)
         self.canvas.clip_selected.connect(self.clip_selected)
+        self.canvas.selection_changed.connect(self.selection_changed)
         self.canvas.clip_move_requested.connect(self.clip_move_requested)
         self.canvas.clip_trim_requested.connect(self.clip_trim_requested)
         self.zoom.valueChanged.connect(self.canvas.set_zoom)
@@ -281,3 +298,8 @@ class TimelineWidget(QWidget):
 
     def select_clip(self, clip_id: str | None) -> None:
         self.canvas.select_clip(clip_id)
+
+    def select_clips(self, clip_ids: list[str]) -> None:
+        self.canvas.selected_clip_ids = set(clip_ids)
+        self.canvas.selected_clip_id = clip_ids[-1] if clip_ids else None
+        self.canvas.update()
