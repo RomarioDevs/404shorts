@@ -98,11 +98,22 @@ def ripple_delete(clips: list[TimelineClip], clip_ids: set[str]) -> list[Timelin
     if not selected:
         raise ValueError("Selecione pelo menos um clipe válido para excluir.")
     intervals = sorted({(clip.timeline_start_ms, clip.timeline_end_ms) for clip in selected})
+    merged_intervals: list[tuple[int, int]] = []
+    for start, end in intervals:
+        if merged_intervals and start <= merged_intervals[-1][1]:
+            previous_start, previous_end = merged_intervals[-1]
+            merged_intervals[-1] = (previous_start, max(previous_end, end))
+        else:
+            merged_intervals.append((start, end))
     result: list[TimelineClip] = []
     for clip in clips:
         if clip.clip_id in clip_ids:
             continue
-        shift = sum(end - start for start, end in intervals if end <= clip.timeline_start_ms)
+        shift = sum(
+            end - start
+            for start, end in merged_intervals
+            if end <= clip.timeline_start_ms
+        )
         result.append(_updated(clip, timeline_start_ms=max(0, clip.timeline_start_ms - shift)))
     return result
 

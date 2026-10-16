@@ -104,11 +104,13 @@ class EditorResourcePanel(QFrame):
 
     resource_requested = Signal(str)
     import_requested = Signal()
+    asset_requested = Signal(str)
 
     _resources = (
         ("media", "Mídia", "▧"),
         ("audio", "Áudio", "♫"),
         ("text", "Texto", "T"),
+        ("image", "Imagem", "IMG"),
         ("stickers", "Stickers", "★"),
         ("effects", "Efeitos", "✦"),
         ("transitions", "Transições", "◈"),
@@ -242,32 +244,44 @@ class EditorResourcePanel(QFrame):
                 widget.deleteLater()
         self.empty_state = None
 
-        cards: list[tuple[str, str, str]] = []
+        cards: list[tuple[str, str, str, str | None, bool]] = []
         if resource == "media" and self.current_media:
-            cards.append((self.current_media.name, "MÍDIA ATUAL", self.current_media.suffix.upper() or "ARQUIVO"))
+            cards.append((
+                self.current_media.name,
+                "MIDIA DE ORIGEM DO PROJETO",
+                self.current_media.suffix.upper() or "ARQUIVO",
+                None,
+                True,
+            ))
         elif resource == "audio":
-            cards.append(("Áudio original", "A1 · SOM", "WAVEFORM"))
-            cards.append(("Adicionar música", "A2 · MÚSICA", "IMPORTAR"))
+            cards.append(("Audio original", "FAIXA VINCULADA AO VIDEO", "DISPONIVEL", None, True))
+            cards.append(("Adicionar musica", "FAIXA DE MUSICA SEPARADA", "INDISPONIVEL", None, False))
         elif resource == "text":
-            cards.append(("Texto básico", "T1 · TEXTO", "EDITÁVEL"))
-            cards.append(("Título principal", "T2 · MODELO", "MODELO"))
+            cards.append(("Texto basico", "CAMADA DE TEXTO EDITAVEL", "ADICIONAR", "text-basic", True))
+            cards.append(("Titulo principal", "MODELO DE TITULO", "ADICIONAR", "text-title", True))
+        elif resource == "image":
+            cards.append(("Adicionar imagem", "CAMADA DE IMAGEM", "IMPORTAR", "image-add", True))
         elif resource == "captions":
-            cards.append(("Legenda automática", "T1 · IA", "TRANSCRIÇÃO"))
+            cards.append(("Legendas", "EDITE NA PAGINA LEGENDAS", "ABRIR ABA", "captions-page", True))
         elif resource in {"effects", "transitions", "filters", "stickers", "templates", "ai"}:
-            cards.append(("Biblioteca em expansão", "RECURSO", "PRÓXIMA FASE"))
+            cards.append(("Indisponivel nesta versao", "RECURSO NAO IMPLEMENTADO", "INDISPONIVEL", None, False))
 
         if not cards:
-            empty = QLabel("Nenhum recurso disponível nesta categoria.\nUse o botão Importar ou adicione um elemento pela timeline.")
+            empty = QLabel(
+                "Nenhum recurso nesta categoria.\n"
+                "Use Importar para carregar midia ou adicionar texto e imagem pela timeline."
+            )
             empty.setObjectName("editorEmptyState")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty.setWordWrap(True)
             self.asset_grid.addWidget(empty, 0, 0, 1, 2)
             return
 
-        for index, (title, subtitle, badge) in enumerate(cards):
+        for index, (title, subtitle, badge, action, enabled) in enumerate(cards):
             card = QFrame()
             card.setObjectName("editorAssetCard")
             card.setProperty("searchText", f"{title} {subtitle} {badge}".lower())
+            card.setEnabled(enabled)
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(8, 8, 8, 8)
             card_layout.setSpacing(3)
@@ -283,6 +297,14 @@ class EditorResourcePanel(QFrame):
             subtitle_label = QLabel(subtitle)
             subtitle_label.setObjectName("editorAssetMeta")
             card_layout.addWidget(subtitle_label)
+            if action:
+                button_text = "Abrir página" if action == "captions-page" else "Adicionar"
+                add_button = QPushButton(button_text)
+                add_button.clicked.connect(
+                    lambda _checked=False, selected_action=action:
+                        self.asset_requested.emit(selected_action)
+                )
+                card_layout.addWidget(add_button)
             self.asset_grid.addWidget(card, index // 2, index % 2)
 
     def _filter_cards(self, text: str) -> None:

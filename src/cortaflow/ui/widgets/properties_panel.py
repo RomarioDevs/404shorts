@@ -70,7 +70,10 @@ class PropertiesPanel(QWidget):
         form.addRow("Posição (ms)", self.clip_timeline_start)
         form.addRow("Origem início (ms)", self.clip_source_start)
         form.addRow("Origem fim (ms)", self.clip_source_end)
-        form.addRow("Transição (ms)", self.clip_transition)
+        form.addRow("Transição (fade de entrada, ms)", self.clip_transition)
+        self.clip_transition.setToolTip(
+            "Na exportação, este valor e Fade entrada usam o maior dos dois tempos."
+        )
         form.addRow("Velocidade", self.clip_speed)
         form.addRow("Fade entrada (ms)", self.clip_fade_in)
         form.addRow("Fade saída (ms)", self.clip_fade_out)

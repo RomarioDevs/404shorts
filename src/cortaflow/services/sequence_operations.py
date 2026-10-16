@@ -146,7 +146,7 @@ def trim_clip_side(
         raise ValueError("Clipe não encontrado.")
     if side == "left":
         delta = timeline_position_ms - target.timeline_start_ms
-        new_source = target.source_start_ms + delta
+        new_source = target.source_start_ms + round(delta * target.speed)
         if new_source >= target.source_end_ms - 100:
             raise ValueError("O clipe ficaria curto demais.")
         return [
@@ -162,7 +162,7 @@ def trim_clip_side(
         ]
     if side == "right":
         delta = timeline_position_ms - target.timeline_start_ms
-        new_source = target.source_start_ms + delta
+        new_source = target.source_start_ms + round(delta * target.speed)
         if new_source <= target.source_start_ms + 100 or new_source > target.source_end_ms:
             raise ValueError("A nova saída precisa ficar dentro do clipe.")
         return [

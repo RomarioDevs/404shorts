@@ -144,24 +144,36 @@ def _timeline_subtitle_track(
         segment_cues, segment_words = clip_subtitle_track(
             cues, words, source_clip, max_words, preset
         )
-        output_cues.extend(
-            cue.model_copy(
-                update={
-                    "start_ms": cue.start_ms + item.timeline_start_ms,
-                    "end_ms": cue.end_ms + item.timeline_start_ms,
-                }
+        for cue in segment_cues:
+            start_ms, end_ms = _map_segment_times(
+                cue.start_ms, cue.end_ms, item
             )
-            for cue in segment_cues
-        )
-        output_words.extend(
-            word.model_copy(
-                update={
-                    "start_ms": word.start_ms + item.timeline_start_ms,
-                    "end_ms": word.end_ms + item.timeline_start_ms,
-                }
+            output_cues.append(
+                cue.model_copy(update={"start_ms": start_ms, "end_ms": end_ms})
             )
-            for word in segment_words
-        )
+        for word in segment_words:
+            start_ms, end_ms = _map_segment_times(
+                word.start_ms, word.end_ms, item
+            )
+            output_words.append(
+                word.model_copy(update={"start_ms": start_ms, "end_ms": end_ms})
+            )
     return sorted(output_cues, key=lambda cue: cue.start_ms), sorted(
         output_words, key=lambda word: word.start_ms
     )
+
+
+def _map_segment_times(
+    start_ms: int,
+    end_ms: int,
+    clip: TimelineClip,
+) -> tuple[int, int]:
+    """Map source-relative timestamps through clip speed onto the timeline."""
+    timeline_start = clip.timeline_start_ms + round(start_ms / clip.speed)
+    timeline_end = clip.timeline_start_ms + round(end_ms / clip.speed)
+    timeline_start = min(clip.timeline_end_ms - 1, max(clip.timeline_start_ms, timeline_start))
+    timeline_end = min(
+        clip.timeline_end_ms,
+        max(timeline_start + 1, timeline_end),
+    )
+    return timeline_start, timeline_end

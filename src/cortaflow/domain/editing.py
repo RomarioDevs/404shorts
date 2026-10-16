@@ -51,6 +51,41 @@ class LayerItem(BaseModel):
         return self.timeline_end_ms - self.timeline_start_ms
 
 
+def layer_transform_at(layer: LayerItem, timestamp_ms: int) -> TransformKeyframe:
+    """Return the interpolated layer transform used by the editor preview."""
+    points = sorted(layer.keyframes, key=lambda item: item.timestamp_ms)
+    if not points:
+        return TransformKeyframe(
+            timestamp_ms=max(0, timestamp_ms),
+            x_percent=layer.x_percent,
+            y_percent=layer.y_percent,
+            scale=1,
+            rotation=layer.rotation,
+            opacity=layer.opacity,
+        )
+    if len(points) == 1:
+        return points[0]
+    for start, end in zip(points, points[1:]):
+        if timestamp_ms < end.timestamp_ms:
+            fraction = max(
+                0.0,
+                min(
+                    1.0,
+                    (timestamp_ms - start.timestamp_ms)
+                    / max(1, end.timestamp_ms - start.timestamp_ms),
+                ),
+            )
+            return TransformKeyframe(
+                timestamp_ms=max(0, timestamp_ms),
+                x_percent=start.x_percent + (end.x_percent - start.x_percent) * fraction,
+                y_percent=start.y_percent + (end.y_percent - start.y_percent) * fraction,
+                scale=start.scale + (end.scale - start.scale) * fraction,
+                rotation=start.rotation + (end.rotation - start.rotation) * fraction,
+                opacity=start.opacity + (end.opacity - start.opacity) * fraction,
+            )
+    return points[-1]
+
+
 class SequenceDocument(BaseModel):
     """Sequência editável derivada de uma sugestão, sem alterar a mídia original."""
 

@@ -145,7 +145,9 @@ def _layer_keyframe_expression(layer: LayerItem, attribute: str, default: float)
             f"if(lt(t\\,{end:.3f})\\,{start_value:.4f}+"
             f"({end_value - start_value:.4f})*(t-{start:.3f})/{duration:.3f}\\,{expression})"
         )
-    return expression
+    first_time = points[0].timestamp_ms / 1000
+    first_value = float(getattr(points[0], attribute))
+    return f"if(lt(t\\,{first_time:.3f})\\,{first_value:.4f}\\,{expression})"
 
 
 def output_dimensions(
@@ -328,8 +330,8 @@ def build_timeline_render_command(
         )
         x_value = _layer_keyframe_expression(layer, "x_percent", layer.x_percent)
         y_value = _layer_keyframe_expression(layer, "y_percent", layer.y_percent)
-        x = f"(W-w)*({x_value})/100"
-        y = f"(H-h)*({y_value})/100"
+        x = f"W*({x_value})/100-w/2"
+        y = f"H*({y_value})/100-h/2"
         start = layer.timeline_start_ms / 1000
         end = layer.timeline_end_ms / 1000
         filters.append(
@@ -348,8 +350,8 @@ def build_timeline_render_command(
         x_value = _layer_keyframe_expression(layer, "x_percent", layer.x_percent)
         y_value = _layer_keyframe_expression(layer, "y_percent", layer.y_percent)
         opacity = _layer_keyframe_expression(layer, "opacity", layer.opacity)
-        x = f"(w-text_w)*({x_value})/100"
-        y = f"(h-text_h)*({y_value})/100"
+        x = f"w*({x_value})/100-text_w/2"
+        y = f"h*({y_value})/100-text_h/2"
         start = layer.timeline_start_ms / 1000
         end = layer.timeline_end_ms / 1000
         font_option = _drawtext_font_option(layer.font_name)

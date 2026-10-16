@@ -48,6 +48,7 @@ class SubtitlesPage(QWidget):
         self.cues: list[SubtitleCue] = []
         self.style = SubtitleStyle()
         self.current_worker: FunctionWorker | None = None
+        self._media_generation = 0
         self.thread_pool = QThreadPool.globalInstance()
 
         layout = QVBoxLayout(self)
@@ -113,6 +114,12 @@ class SubtitlesPage(QWidget):
 
     def set_media(self, path: Path | None, transcript: Transcript | None = None) -> None:
         """Select the source and restore any transcript already stored in the project."""
+        self._media_generation += 1
+        worker = self.current_worker
+        if worker is not None:
+            self.current_worker = None
+            worker.cancel()
+            self.progress.hide()
         self.source_path = path.resolve() if path else None
         self.transcript = transcript
         self.set_cues(transcript.cues if transcript else [])
@@ -167,9 +174,7 @@ class SubtitlesPage(QWidget):
             allow_download=allow_download,
         )
         worker = FunctionWorker(transcriber.transcribe, self.source_path, self.language.currentData())
-        worker.signals.progress.connect(self._transcription_progress)
-        worker.signals.finished.connect(self._transcription_finished)
-        worker.signals.failed.connect(self._operation_failed)
+        self._connect_worker(worker, self._transcription_progress, self._transcription_finished)
         self._start_worker(worker, "Carregando o modelo de transcrição…")
 
     def _transcription_progress(self, state: dict[str, Any]) -> None:
@@ -257,9 +262,11 @@ class SubtitlesPage(QWidget):
             list(self.cues),
             self.style,
         )
-        worker.signals.progress.connect(lambda _state: self.status.setText("Aplicando legendas ao vídeo…"))
-        worker.signals.finished.connect(self._burn_finished)
-        worker.signals.failed.connect(self._operation_failed)
+        self._connect_worker(
+            worker,
+            lambda _state: self.status.setText("Aplicando legendas ao vídeo…"),
+            self._burn_finished,
+        )
         self._start_worker(worker, "Aplicando legendas ao vídeo…")
 
     def _burn_finished(self, destination: Path) -> None:
@@ -279,6 +286,25 @@ class SubtitlesPage(QWidget):
         self.status.setText(status)
         self._update_actions()
         self.thread_pool.start(worker)
+
+    def _connect_worker(self, worker, progress_handler, finished_handler) -> None:
+        generation = self._media_generation
+        worker.signals.progress.connect(
+            lambda payload, worker=worker, generation=generation:
+                self._dispatch_worker(worker, generation, progress_handler, payload)
+        )
+        worker.signals.finished.connect(
+            lambda payload, worker=worker, generation=generation:
+                self._dispatch_worker(worker, generation, finished_handler, payload)
+        )
+        worker.signals.failed.connect(
+            lambda message, worker=worker, generation=generation:
+                self._dispatch_worker(worker, generation, self._operation_failed, message)
+        )
+
+    def _dispatch_worker(self, worker, generation, handler, payload) -> None:
+        if worker is self.current_worker and generation == self._media_generation:
+            handler(payload)
 
     def _finish_worker(self) -> None:
         self.current_worker = None

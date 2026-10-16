@@ -263,6 +263,11 @@ class AnalysisPage(QWidget):
         silences: list | None = None,
         selection_settings: ClipSelectionSettings | None = None,
     ) -> None:
+        worker = self.current_worker
+        if worker is not None:
+            self.current_worker = None
+            worker.cancel()
+            self.progress.hide()
         self.source_path = source_path.resolve() if source_path else None
         self.transcript = transcript
         self.total_duration_ms = max(0, total_duration_ms)
@@ -347,9 +352,7 @@ class AnalysisPage(QWidget):
             self.total_duration_ms,
             self.selection_settings,
         )
-        worker.signals.progress.connect(self._progressed)
-        worker.signals.finished.connect(self._finished)
-        worker.signals.failed.connect(self._failed)
+        self._connect_worker(worker, self._progressed, self._finished)
         self.current_worker = worker
         self.progress.show()
         self.status.setText("Iniciando análise…")
@@ -480,9 +483,7 @@ class AnalysisPage(QWidget):
             selected,
             200,
         )
-        worker.signals.progress.connect(self._face_progressed)
-        worker.signals.finished.connect(self._faces_finished)
-        worker.signals.failed.connect(self._failed)
+        self._connect_worker(worker, self._face_progressed, self._faces_finished)
         self.current_worker = worker
         self.progress.show()
         self.face_status.setText("Iniciando detecção facial local…")
@@ -587,9 +588,7 @@ class AnalysisPage(QWidget):
             list(self.scenes),
             list(self.speaker_overrides),
         )
-        worker.signals.progress.connect(self._speaker_progressed)
-        worker.signals.finished.connect(self._speaker_finished)
-        worker.signals.failed.connect(self._failed)
+        self._connect_worker(worker, self._speaker_progressed, self._speaker_finished)
         self.current_worker = worker
         self.progress.show()
         self.speaker_status.setText("Analisando voz, energia e movimento da boca…")
@@ -677,6 +676,27 @@ class AnalysisPage(QWidget):
             self.current_worker.cancel()
             self.cancel_button.setEnabled(False)
             self.status.setText("Cancelando análise…")
+
+    def _connect_worker(self, worker, progress_handler, finished_handler) -> None:
+        worker.signals.progress.connect(
+            lambda payload, worker=worker: self._dispatch_worker(
+                worker, progress_handler, payload
+            )
+        )
+        worker.signals.finished.connect(
+            lambda payload, worker=worker: self._dispatch_worker(
+                worker, finished_handler, payload
+            )
+        )
+        worker.signals.failed.connect(
+            lambda message, worker=worker: self._dispatch_worker(
+                worker, self._failed, message
+            )
+        )
+
+    def _dispatch_worker(self, worker, handler, payload) -> None:
+        if worker is self.current_worker:
+            handler(payload)
 
     def _failed(self, message: str) -> None:
         self._finish_worker()

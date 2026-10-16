@@ -196,6 +196,14 @@ class ReframeOverlay(QWidget):
         width, height = self.source_width * scale, self.source_height * scale
         return QRectF((self.width() - width) / 2, (self.height() - height) / 2, width, height)
 
+    def preview_rect(self) -> QRectF:
+        """Return the output crop bounds in preview-widget coordinates."""
+        if not self.source_width or not self.source_height:
+            return QRectF()
+        video_rect = self._video_rect()
+        crop = self._crop_at_timestamp()
+        return self._source_rect(crop.x, crop.y, crop.width, crop.height, video_rect)
+
     def _source_rect(self, x: float, y: float, width: float, height: float, video: QRectF) -> QRectF:
         scale_x, scale_y = video.width() / self.source_width, video.height() / self.source_height
         return QRectF(video.left() + x * scale_x, video.top() + y * scale_y, width * scale_x, height * scale_y)

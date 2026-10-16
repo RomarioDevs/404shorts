@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 650)
         self.project = ProjectDocument()
         self.project_path: Path | None = None
+        self._saved_project_snapshot = self._project_snapshot()
         self.automatic_worker: FunctionWorker | None = None
         self._create_actions()
         self._create_central_area()
@@ -217,6 +218,7 @@ class MainWindow(QMainWindow):
         self.editor_page.settings_changed.connect(self._editor_settings_changed)
         self.editor_page.reframe_keyframes_changed.connect(self._editor_reframe_changed)
         self.editor_page.automatic_requested.connect(self._start_automatic_pipeline)
+        self.editor_page.navigation_requested.connect(self.navigation.setCurrentRow)
         self.export_page.settings_changed.connect(self._export_settings_changed)
         self.export_page.cues_changed.connect(self._export_cues_changed)
         self.export_page.reframe_edit_requested.connect(self._open_export_reframe)
@@ -232,6 +234,12 @@ class MainWindow(QMainWindow):
 
     def _open_imported_media(self, metadata) -> None:
         if metadata.local_path:
+            if not self._confirm_project_change("importar outra mídia"):
+                return
+            self._cancel_automatic_for_project_change()
+            had_saved_project = self.project_path is not None
+            self.project_path = None
+            self.project.name = metadata.title or "Projeto sem título"
             self.project.source_path = metadata.local_path
             self.project.source_metadata = metadata.model_dump(mode="json")
             self.project.transcript = None
@@ -269,8 +277,14 @@ class MainWindow(QMainWindow):
                 selection_settings=self.project.clip_selection,
             )
             self._sync_editor_state()
+            self.setWindowTitle(f"{self.project.name} — CortaFlow AI")
             self.automatic_action.setEnabled(True)
             self.navigation.setCurrentRow(3)
+            if had_saved_project:
+                self.statusBar().showMessage(
+                    "A mídia foi aberta como um novo projeto. O projeto anterior foi preservado; use Salvar como para gravar este.",
+                    10_000,
+                )
 
     def _transcript_changed(self, transcript) -> None:
         self.project.transcript = transcript
@@ -344,9 +358,15 @@ class MainWindow(QMainWindow):
             self.project.audio_settings,
             self.project.clip_selection.max_results,
         )
-        worker.signals.progress.connect(self._automatic_progress)
-        worker.signals.finished.connect(self._automatic_finished)
-        worker.signals.failed.connect(self._automatic_failed)
+        worker.signals.progress.connect(
+            lambda state, worker=worker: self._automatic_progress(worker, state)
+        )
+        worker.signals.finished.connect(
+            lambda result, worker=worker: self._automatic_finished(worker, result)
+        )
+        worker.signals.failed.connect(
+            lambda message, worker=worker: self._automatic_failed(worker, message)
+        )
         self.automatic_worker = worker
         self.automatic_action.setEnabled(False)
         self.cancel_automatic_action.setEnabled(True)
@@ -358,7 +378,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message)
         QThreadPool.globalInstance().start(worker)
 
-    def _automatic_progress(self, state: dict) -> None:
+    def _automatic_progress(self, worker: FunctionWorker, state: dict) -> None:
+        if worker is not self.automatic_worker:
+            return
         message = str(state.get("message", "Preparando cortes sugeridos…"))
         self.statusBar().showMessage(message)
         self.suggestions_page.set_processing(True, message)
@@ -375,7 +397,9 @@ class MainWindow(QMainWindow):
                 self.suggestions_page.set_suggestions(suggestions)
             self.suggestions_page.set_previews(list(state.get("previews") or []))
 
-    def _automatic_finished(self, result) -> None:
+    def _automatic_finished(self, worker: FunctionWorker, result) -> None:
+        if worker is not self.automatic_worker:
+            return
         self.project.source_metadata = result.metadata.model_dump(mode="json")
         self.project.transcript = result.transcript
         self.project.scenes = result.analysis.scenes
@@ -426,7 +450,7 @@ class MainWindow(QMainWindow):
         )
         self.suggestions_page.set_processing(False, complete_message)
         self._sync_editor_state()
-        self._finish_automatic_pipeline()
+        self._finish_automatic_pipeline(worker)
         self.navigation.setCurrentRow(2)
         self.statusBar().showMessage(
             f"Criação automática concluída: {len(result.analysis.suggestions)} cortes e "
@@ -435,8 +459,10 @@ class MainWindow(QMainWindow):
             12_000,
         )
 
-    def _automatic_failed(self, message: str) -> None:
-        self._finish_automatic_pipeline()
+    def _automatic_failed(self, worker: FunctionWorker, message: str) -> None:
+        if worker is not self.automatic_worker:
+            return
+        self._finish_automatic_pipeline(worker)
         if "cancelad" in message.lower():
             self.suggestions_page.set_processing(False, "Criação automática cancelada.")
             self.statusBar().showMessage("Criação automática cancelada.", 8000)
@@ -458,8 +484,20 @@ class MainWindow(QMainWindow):
             )
             self.statusBar().showMessage("Cancelando criação automática…")
 
-    def _finish_automatic_pipeline(self) -> None:
+    def _finish_automatic_pipeline(self, worker: FunctionWorker | None = None) -> None:
+        if worker is not None and worker is not self.automatic_worker:
+            return
         self.automatic_worker = None
+        self.cancel_automatic_action.setEnabled(False)
+        self.automatic_action.setEnabled(
+            bool(self.project.source_path and self.project.source_path.is_file())
+        )
+
+    def _cancel_automatic_for_project_change(self) -> None:
+        worker = self.automatic_worker
+        if worker is not None:
+            worker.cancel()
+            self.automatic_worker = None
         self.cancel_automatic_action.setEnabled(False)
         self.automatic_action.setEnabled(
             bool(self.project.source_path and self.project.source_path.is_file())
@@ -720,7 +758,12 @@ class MainWindow(QMainWindow):
         )
 
     def _new_project(self) -> None:
-        self.project = ProjectDocument(); self.project_path = None
+        if not self._confirm_project_change("criar um novo projeto"):
+            return
+        self._cancel_automatic_for_project_change()
+        self.project = ProjectDocument()
+        self.project_path = None
+        self.editor_page.clear_media()
         self.subtitles_page.set_media(None)
         self.analysis_page.set_context(None, None)
         self.analysis_page.restore_faces([], [], None)
@@ -729,6 +772,7 @@ class MainWindow(QMainWindow):
         self.suggestions_page.set_suggestions([])
         self.suggestions_page.set_media_source(None)
         self._sync_editor_state()
+        self._saved_project_snapshot = self._project_snapshot()
         self.automatic_action.setEnabled(False)
         self.setWindowTitle("CortaFlow AI")
         self.navigation.setCurrentRow(0)
@@ -739,6 +783,8 @@ class MainWindow(QMainWindow):
             self._load_project_path(Path(filename))
 
     def _load_project_path(self, path: Path) -> None:
+        if not self._confirm_project_change("abrir outro projeto"):
+            return
         selected_path = path
         if recovery_available(path):
             answer = QMessageBox.question(
@@ -755,7 +801,9 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Falha ao abrir", str(exc))
             return
+        self._cancel_automatic_for_project_change()
         self.project, self.project_path = project, path
+        self._saved_project_snapshot = self._project_snapshot()
         self.setWindowTitle(f"{project.name} — CortaFlow AI")
         self._record_history()
         if project.source_path and project.source_path.is_file():
@@ -800,16 +848,58 @@ class MainWindow(QMainWindow):
             self.suggestions_page.set_suggestions(project.suggestions)
             self.suggestions_page.set_media_source(project.source_path)
             self.automatic_action.setEnabled(True)
+        else:
+            self.editor_page.clear_media()
+            self.editor_page.set_reframe_data([], [], None)
+            self.subtitles_page.set_media(None)
+            self.analysis_page.set_context(None, None)
+            self.analysis_page.restore_faces([], [], None)
+            self.analysis_page.restore_speakers([], [])
+            self.suggestions_page.set_suggestions(project.suggestions)
+            self.suggestions_page.set_media_source(None)
+            self.automatic_action.setEnabled(False)
+            if project.source_path:
+                self.statusBar().showMessage(
+                    f"O arquivo de origem não foi encontrado: {project.source_path}", 10_000
+                )
+            self._sync_editor_state()
 
-    def _save_project(self, checked: bool = False, save_as: bool = False) -> None:
-        if self.project_path is None or save_as:
+    def _save_project(self, checked: bool = False, save_as: bool = False) -> bool:
+        target_path = self.project_path
+        if target_path is None or save_as:
             filename, _ = QFileDialog.getSaveFileName(self, "Salvar projeto", "projeto.cortaflow.json", "Projeto CortaFlow (*.cortaflow.json)")
-            if not filename: return
-            self.project_path = Path(filename)
-        try: save_project(self.project, self.project_path)
-        except Exception as exc: QMessageBox.critical(self, "Falha ao salvar", str(exc)); return
+            if not filename: return False
+            target_path = Path(filename)
+        try: save_project(self.project, target_path)
+        except Exception as exc: QMessageBox.critical(self, "Falha ao salvar", str(exc)); return False
+        self.project_path = target_path
+        self._saved_project_snapshot = self._project_snapshot()
         self._record_history()
         self.statusBar().showMessage(f"Projeto salvo: {self.project_path}", 5000)
+        return True
+
+    def _project_snapshot(self) -> str:
+        return self.project.model_dump_json()
+
+    def _confirm_project_change(self, action: str) -> bool:
+        if self._project_snapshot() == self._saved_project_snapshot:
+            return True
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Alterações não salvas")
+        box.setText(f"Há alterações não salvas antes de {action}.")
+        box.setInformativeText("Salve o projeto, descarte as alterações ou cancele a operação.")
+        save_button = box.addButton("Salvar", QMessageBox.ButtonRole.AcceptRole)
+        discard_button = box.addButton("Descartar", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(save_button)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is save_button:
+            return self._save_project()
+        if clicked is discard_button:
+            return True
+        return False
 
     def _autosave(self) -> None:
         if self.project_path:

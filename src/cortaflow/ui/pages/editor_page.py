@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QThreadPool, QUrl, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QThreadPool, QUrl, Qt, Signal
 from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, QUndoCommand, QUndoStack
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -26,7 +26,13 @@ from PySide6.QtWidgets import (
 )
 
 from cortaflow.domain.clip import ClipRange, format_timestamp
-from cortaflow.domain.editing import LayerItem, SequenceDocument, TimelineClip, TransformKeyframe
+from cortaflow.domain.editing import (
+    LayerItem,
+    SequenceDocument,
+    TimelineClip,
+    TransformKeyframe,
+    layer_transform_at,
+)
 from cortaflow.domain.project import ReframeKeyframe
 from cortaflow.domain.tracking import CropFrame
 from cortaflow.services.editor_operations import (
@@ -86,6 +92,7 @@ class EditorPage(QWidget):
     settings_changed = Signal(object)
     reframe_keyframes_changed = Signal(object)
     automatic_requested = Signal()
+    navigation_requested = Signal(int)
     def __init__(self) -> None:
         super().__init__()
         self.source_path: Path | None = None
@@ -108,6 +115,7 @@ class EditorPage(QWidget):
         self.undo_stack = QUndoStack(self)
         self.export_worker: FunctionWorker | None = None
         self.preview_worker: FunctionWorker | None = None
+        self._preview_generation = 0
         self.thread_pool = QThreadPool.globalInstance()
 
         self.player = QMediaPlayer(self)
@@ -130,6 +138,7 @@ class EditorPage(QWidget):
         self.resources = EditorResourcePanel()
         self.resources.resource_requested.connect(self._handle_resource_request)
         self.resources.import_requested.connect(self.media_import_requested)
+        self.resources.asset_requested.connect(self._activate_resource_asset)
         top_layout.addWidget(self.resources)
 
         editor_body = QWidget()
@@ -206,6 +215,7 @@ class EditorPage(QWidget):
         self.layer_overlay.preview_background_released.connect(self._end_crop_drag)
         self.reframe_overlay.crop_changed.connect(self._apply_dragged_crop)
         video_stack.addWidget(self.layer_overlay)
+        self.layer_overlay.set_output_rect(self.reframe_overlay.preview_rect())
         preview_header = QFrame()
         preview_header.setObjectName("previewHeader")
         preview_header_layout = QHBoxLayout(preview_header)
@@ -217,7 +227,7 @@ class EditorPage(QWidget):
         preview_header_layout.addWidget(self.preview_format_label)
         self.preview_aspect = QComboBox()
         self.preview_aspect.addItems(["9:16", "16:9", "1:1", "4:5", "original"])
-        self.preview_aspect.setToolTip("Formato do vídeo exportado")
+        self.preview_aspect.setToolTip("Formato de exportacao. A tela mostra a guia de corte; use Previa vertical para conferir a composicao renderizada.")
         preview_header_layout.addWidget(QLabel("Formato"))
         preview_header_layout.addWidget(self.preview_aspect)
         layout.addWidget(preview_header)
@@ -381,7 +391,7 @@ class EditorPage(QWidget):
         super().closeEvent(event)
 
     def _handle_resource_request(self, resource: str) -> None:
-        """Route the professional resource browser to current editor capabilities."""
+        """Route resource selection to supported editor actions."""
         handlers = {
             "text": self.add_text_layer,
             "image": self.add_image_layer,
@@ -392,22 +402,32 @@ class EditorPage(QWidget):
             handler()
             return
         messages = {
-            "media": "Mídia selecionada. Escolha o clipe na timeline para editar o corte no inspetor.",
-            "audio": "Áudio selecionado: adicione música ou ajuste o áudio original no inspector.",
-            "captions": "Legendas selecionadas: transcreva ou revise o texto na página Legendas.",
-            "effects": "Efeitos selecionados: escolha uma categoria e aplique o efeito à camada na próxima etapa.",
-            "transitions": "Transições selecionadas: arraste uma transição entre dois clipes na timeline.",
-            "filters": "Filtros selecionados: os ajustes serão aplicados ao clipe selecionado.",
-            "stickers": "Stickers selecionados: a biblioteca de elementos será integrada à sequência.",
-            "templates": "Modelos selecionados: escolha um preset para iniciar uma sequência.",
-            "ai": "IA selecionada: use Gerar cortes sugeridos para análise automática da mídia.",
+            "media": "Este projeto usa uma midia de origem. Importar outra abre um novo projeto.",
+            "audio": "Edicao de musica em faixa separada ainda nao esta disponivel.",
+            "captions": "Transcreva ou revise o texto na pagina Legendas.",
+            "effects": "Efeitos em camadas ainda nao estao disponiveis.",
+            "transitions": "Transicoes entre clipes ainda nao estao disponiveis; use Fade de entrada no inspetor.",
+            "filters": "Filtros ainda nao estao disponiveis nesta biblioteca.",
+            "stickers": "Stickers ainda nao estao disponiveis.",
+            "templates": "Modelos ainda nao estao disponiveis.",
         }
         self.status_label.setText(messages.get(resource, "Recurso selecionado."))
+
+    def _activate_resource_asset(self, asset: str) -> None:
+        if asset == "text-basic":
+            self.add_text_layer()
+        elif asset == "text-title":
+            self.add_text_layer("Título principal")
+        elif asset == "image-add":
+            self.add_image_layer()
+        elif asset == "captions-page":
+            self.navigation_requested.emit(4)
 
     def _properties_changed(self, settings: object) -> None:
         reframe, subtitle, audio, export = settings
         self.audio.setVolume(min(1.0, audio.volume / 2))
         self.reframe_overlay.set_settings(reframe)
+        self.layer_overlay.set_output_rect(self.reframe_overlay.preview_rect())
         self._update_preview_format(reframe, export)
         self.settings_changed.emit((reframe, subtitle, audio, export))
 
@@ -481,6 +501,9 @@ class EditorPage(QWidget):
         width: int | None = None,
         height: int | None = None,
     ) -> None:
+        self._invalidate_media_preview()
+        self.timeline.canvas.set_media_previews([], [])
+        self.player.stop()
         self.source_path = path.resolve()
         self.resources.set_media(self.source_path)
         self.source_duration_ms = 0
@@ -493,8 +516,38 @@ class EditorPage(QWidget):
         self.source_height = height or 0
         self.timeline.set_markers(self.in_ms, self.out_ms)
         self.reframe_overlay.set_source_size(width, height)
+        self.layer_overlay.set_output_rect(self.reframe_overlay.preview_rect())
         self.status_label.setText(f"Mídia carregada · {self.fps:.3g} FPS")
         self.player.setSource(QUrl.fromLocalFile(str(self.source_path)))
+
+    def clear_media(self) -> None:
+        """Unload the current source and discard previews tied to it."""
+        self._invalidate_media_preview()
+        self.player.stop()
+        self.player.setSource(QUrl())
+        self.source_path = None
+        self.source_duration_ms = 0
+        self.timeline_position_ms = 0
+        self.active_video_clip_id = None
+        self.source_width = 0
+        self.source_height = 0
+        self.in_ms = 0
+        self.out_ms = None
+        self.resources.set_media(None)
+        self.timeline.set_markers(self.in_ms, self.out_ms)
+        self.timeline.canvas.set_media_previews([], [])
+        self.reframe_overlay.set_source_size(None, None)
+        self.reframe_overlay.set_data([], [], None)
+        self.layer_overlay.set_output_rect(QRectF())
+        self.layer_overlay.set_position(0)
+        self.status_label.setText("Importe uma mídia para começar.")
+
+    def _invalidate_media_preview(self) -> None:
+        self._preview_generation += 1
+        worker = self.preview_worker
+        self.preview_worker = None
+        if worker is not None:
+            worker.cancel()
 
     def set_selection(self, start_ms: int, end_ms: int) -> None:
         """Load an externally suggested range into the basic editor."""
@@ -571,6 +624,7 @@ class EditorPage(QWidget):
             export_settings,
         )
         self.reframe_overlay.set_settings(reframe_settings)
+        self.layer_overlay.set_output_rect(self.reframe_overlay.preview_rect())
         self.preview_aspect.setCurrentText(reframe_settings.aspect_ratio)
         self._update_preview_format(reframe_settings, export_settings)
         self.timeline.select_layer(None)
@@ -692,12 +746,16 @@ class EditorPage(QWidget):
         try:
             for clip in group:
                 if side == "left":
-                    source_start = clip.source_start_ms + (position_ms - clip.timeline_start_ms)
+                    source_start = clip.source_start_ms + round(
+                        (position_ms - clip.timeline_start_ms) * clip.speed
+                    )
                     if source_start >= clip.source_end_ms - 250:
                         raise ValueError("O clipe precisa manter pelo menos 250 ms.")
                     updated = trim_clip(updated, clip.clip_id, source_start, clip.source_end_ms)
                 else:
-                    source_end = clip.source_start_ms + (position_ms - clip.timeline_start_ms)
+                    source_end = clip.source_start_ms + round(
+                        (position_ms - clip.timeline_start_ms) * clip.speed
+                    )
                     if source_end <= clip.source_start_ms + 250:
                         raise ValueError("O clipe precisa manter pelo menos 250 ms.")
                     updated = trim_clip(updated, clip.clip_id, clip.source_start_ms, source_end)
@@ -806,10 +864,13 @@ class EditorPage(QWidget):
         self.layers_changed.emit(list(layers))
         self.layer_overlay.set_position(self.timeline_position_ms)
 
-    def add_text_layer(self) -> None:
-        text, accepted = QInputDialog.getText(self, "Adicionar texto", "Texto da camada:")
-        if not accepted:
-            return
+    def add_text_layer(self, initial_text: str | None = None) -> None:
+        if initial_text is None:
+            text, accepted = QInputDialog.getText(self, "Adicionar texto", "Texto da camada:")
+            if not accepted:
+                return
+        else:
+            text = initial_text
         sequence = self.sequence or SequenceDocument(
             sequence_id="editor-draft", name="Rascunho", clips=list(self.timeline_clips)
         )
@@ -874,10 +935,36 @@ class EditorPage(QWidget):
         self.properties.set_selected_layer(None)
 
     def _move_layer(self, item_id: str, x_percent: float, y_percent: float) -> None:
+        sequence = self.sequence or SequenceDocument(
+            sequence_id="editor-draft",
+            name="Rascunho",
+            clips=list(self.timeline_clips),
+            layers=self.layers,
+        )
+        layer = next((item for item in self.layers if item.item_id == item_id), None)
+        if layer is None:
+            return
         try:
-            updated = update_layer(self.sequence or SequenceDocument(
-                sequence_id="editor-draft", name="Rascunho", clips=list(self.timeline_clips), layers=self.layers
-            ), item_id, x_percent=x_percent, y_percent=y_percent)
+            if layer.keyframes:
+                transform = layer_transform_at(layer, self.timeline_position_ms)
+                keyframe = transform.model_copy(
+                    update={
+                        "timestamp_ms": self.timeline_position_ms,
+                        "x_percent": x_percent,
+                        "y_percent": y_percent,
+                    }
+                )
+                keyframes = [
+                    point for point in layer.keyframes
+                    if point.timestamp_ms != self.timeline_position_ms
+                ]
+                keyframes.append(keyframe)
+                keyframes.sort(key=lambda point: point.timestamp_ms)
+                updated = update_layer(sequence, item_id, keyframes=keyframes)
+            else:
+                updated = update_layer(
+                    sequence, item_id, x_percent=x_percent, y_percent=y_percent
+                )
         except ValueError as exc:
             self.status_label.setText(str(exc))
             return
@@ -981,9 +1068,9 @@ class EditorPage(QWidget):
         }
         width, height = dimensions[reframe.aspect_ratio]
         if width > 0 and height > 0:
-            self.preview_format_label.setText(f"{width}×{height} · {export.fps:g} FPS")
+            self.preview_format_label.setText(f"Guia: {width}x{height} - {export.fps:g} FPS")
         else:
-            self.preview_format_label.setText(f"Formato {reframe.aspect_ratio} · {export.fps:g} FPS")
+            self.preview_format_label.setText(f"Guia: {reframe.aspect_ratio} - {export.fps:g} FPS")
 
     def _seek_timeline(self, position_ms: int, resume: bool | None = None) -> None:
         was_playing = self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
@@ -1027,6 +1114,7 @@ class EditorPage(QWidget):
         self.timeline.set_position(target)
         self.layer_overlay.set_position(target)
         self.reframe_overlay.set_timestamp(source_position)
+        self.layer_overlay.set_output_rect(self.reframe_overlay.preview_rect())
         self.time_label.setText(
             f"{format_timestamp(target)} / {format_timestamp(self.timeline.canvas.duration_ms)}"
         )
@@ -1095,6 +1183,7 @@ class EditorPage(QWidget):
         self.timeline.set_position(self.timeline_position_ms)
         self.layer_overlay.set_position(self.timeline_position_ms)
         self.reframe_overlay.set_timestamp(source_position)
+        self.layer_overlay.set_output_rect(self.reframe_overlay.preview_rect())
         self.time_label.setText(
             f"{format_timestamp(self.timeline_position_ms)} / {format_timestamp(self.timeline.canvas.duration_ms)}"
         )
@@ -1110,19 +1199,48 @@ class EditorPage(QWidget):
         else:
             self._position_changed(self.player.position())
         if self.source_path and duration > 0 and self.preview_worker is None:
-            worker = FunctionWorker(build_media_preview_data, self.source_path, duration)
-            worker.signals.finished.connect(self._media_preview_finished)
-            worker.signals.failed.connect(lambda message: self.status_label.setText(f"Preview da timeline indisponível: {message}"))
+            source = self.source_path
+            generation = self._preview_generation
+            worker = FunctionWorker(build_media_preview_data, source, duration)
+            worker.signals.finished.connect(
+                lambda payload, worker=worker, source=source, generation=generation:
+                    self._media_preview_finished(worker, source, generation, payload)
+            )
+            worker.signals.failed.connect(
+                lambda message, worker=worker, source=source, generation=generation:
+                    self._media_preview_failed(worker, source, generation, message)
+            )
             self.preview_worker = worker
             self.thread_pool.start(worker)
 
-    def _media_preview_finished(self, payload: object) -> None:
-        self.preview_worker = None
+    def _media_preview_finished(
+        self,
+        worker: FunctionWorker,
+        source: Path,
+        generation: int,
+        payload: object,
+    ) -> None:
+        if self.preview_worker is worker:
+            self.preview_worker = None
+        if generation != self._preview_generation or source != self.source_path:
+            return
         if isinstance(payload, dict):
             self.timeline.canvas.set_media_previews(
                 list(payload.get("thumbnails", [])),
                 list(payload.get("waveform", [])),
             )
+
+    def _media_preview_failed(
+        self,
+        worker: FunctionWorker,
+        source: Path,
+        generation: int,
+        message: str,
+    ) -> None:
+        if self.preview_worker is worker:
+            self.preview_worker = None
+        if generation == self._preview_generation and source == self.source_path:
+            self.status_label.setText(f"Preview da timeline indispon?vel: {message}")
 
     def _playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
         text = "Pausar" if state == QMediaPlayer.PlaybackState.PlayingState else "Reproduzir"

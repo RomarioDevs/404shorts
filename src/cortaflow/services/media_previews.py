@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import math
 import shutil
-import struct
 import subprocess
 from threading import Lock
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+import numpy as np
 
 from cortaflow.infrastructure.ffmpeg import find_executable, hidden_console_options
 
@@ -78,23 +79,87 @@ def build_media_preview_data(
                         thumbnails.append(str(destination))
         if cancelled and cancelled.is_set():
             return {"thumbnails": [], "waveform": []}
-        waveform = _extract_waveform(source, duration_ms)
+        waveform = _extract_waveform(source, duration_ms, cancelled=cancelled)
         return {"thumbnails": thumbnails, "waveform": waveform}
 
 
-def _extract_waveform(source: Path, duration_ms: int, samples: int = 240) -> list[float]:
+def _extract_waveform(
+    source: Path,
+    duration_ms: int,
+    samples: int = 240,
+    cancelled=None,
+) -> list[float]:
+    """Read bounded PCM buckets so waveform memory stays constant for long media."""
+    if duration_ms <= 0 or samples <= 0:
+        return []
     command = [
         str(find_executable("ffmpeg")), "-hide_banner", "-loglevel", "error",
         "-i", str(source.resolve()), "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1",
     ]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, **hidden_console_options())
-    raw = result.stdout
-    if not raw:
-        return []
-    values = struct.unpack(f"<{len(raw) // 2}h", raw[: len(raw) // 2 * 2])
-    bucket_size = max(1, len(values) // samples)
-    waveform = []
-    for start in range(0, len(values), bucket_size):
-        bucket = values[start : start + bucket_size]
-        waveform.append(min(1.0, sum(abs(value) for value in bucket) / max(1, len(bucket)) / 32768))
-    return waveform[:samples]
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        shell=False,
+        **hidden_console_options(),
+    )
+    waveform: list[float] = []
+    bucket_samples = max(1, math.ceil(duration_ms * 8 / samples))
+    try:
+        assert process.stdout is not None
+        exhausted = False
+        for _ in range(samples):
+            remaining = bucket_samples
+            total_amplitude = 0
+            count = 0
+            while remaining > 0:
+                if cancelled and cancelled.is_set():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    return []
+                read_samples = min(32_768, remaining)
+                raw = process.stdout.read(read_samples * 2)
+                if len(raw) % 2:
+                    raw += process.stdout.read(1)
+                if len(raw) % 2:
+                    raw = raw[:-1]
+                if not raw:
+                    exhausted = True
+                    break
+                values = np.frombuffer(raw, dtype="<i2").astype(np.int32)
+                if not values.size:
+                    exhausted = True
+                    break
+                total_amplitude += int(np.abs(values).sum(dtype=np.int64))
+                count += int(values.size)
+                remaining -= int(values.size)
+            if count:
+                waveform.append(min(1.0, total_amplitude / count / 32768))
+            if exhausted or count < bucket_samples:
+                break
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        if process.poll() is None:
+            process.wait()
+        return waveform
+    except Exception:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        raise
+    finally:
+        if process.stdout is not None and not process.stdout.closed:
+            process.stdout.close()

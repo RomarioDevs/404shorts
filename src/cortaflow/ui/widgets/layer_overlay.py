@@ -6,7 +6,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
-from cortaflow.domain.editing import LayerItem
+from cortaflow.domain.editing import LayerItem, layer_transform_at
 
 
 class LayerOverlay(QWidget):
@@ -29,6 +29,11 @@ class LayerOverlay(QWidget):
         self._drag_offset = QPointF()
         self._background_dragging = False
         self._image_cache: dict[str, QImage] = {}
+        self.output_rect = QRectF()
+
+    def set_output_rect(self, rect: QRectF) -> None:
+        self.output_rect = QRectF(rect)
+        self.update()
 
     def set_layers(self, layers: list[LayerItem]) -> None:
         self.layers = list(layers)
@@ -62,10 +67,12 @@ class LayerOverlay(QWidget):
         ]
 
     def _rect(self, layer: LayerItem):
-        width = self.width() * layer.width_percent / 100
-        height = self.height() * layer.height_percent / 100
-        left = self.width() * layer.x_percent / 100 - width / 2
-        top = self.height() * layer.y_percent / 100 - height / 2
+        bounds = self.output_rect if not self.output_rect.isEmpty() else QRectF(self.rect())
+        width = bounds.width() * layer.width_percent / 100
+        height = bounds.height() * layer.height_percent / 100
+        transform = layer_transform_at(layer, self.position_ms)
+        left = bounds.left() + bounds.width() * transform.x_percent / 100 - width / 2
+        top = bounds.top() + bounds.height() * transform.y_percent / 100 - height / 2
         return left, top, width, height
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
@@ -96,10 +103,13 @@ class LayerOverlay(QWidget):
         if layer is None:
             return
         _, _, width, height = self._rect(layer)
-        left = max(0.0, min(self.width() - width, event.position().x() - self._drag_offset.x()))
-        top = max(0.0, min(self.height() - height, event.position().y() - self._drag_offset.y()))
-        x_percent = ((left + width / 2) / max(1, self.width())) * 100
-        y_percent = ((top + height / 2) / max(1, self.height())) * 100
+        bounds = self.output_rect if not self.output_rect.isEmpty() else QRectF(self.rect())
+        center_x = event.position().x() - self._drag_offset.x() + width / 2
+        center_y = event.position().y() - self._drag_offset.y() + height / 2
+        x_percent = ((center_x - bounds.left()) / max(1, bounds.width())) * 100
+        y_percent = ((center_y - bounds.top()) / max(1, bounds.height())) * 100
+        x_percent = max(0.0, min(100.0, x_percent))
+        y_percent = max(0.0, min(100.0, y_percent))
         self.layer_moved.emit(self._drag_id, x_percent, y_percent)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
@@ -112,11 +122,13 @@ class LayerOverlay(QWidget):
     def paintEvent(self, event: object) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        bounds = self.output_rect if not self.output_rect.isEmpty() else QRectF(self.rect())
+        painter.setClipRect(bounds)
         for layer in self._visible_layers():
             left, top, width, height = self._rect(layer)
             rect = QRectF(left, top, width, height)
             painter.save()
-            painter.setOpacity(layer.opacity)
+            painter.setOpacity(layer_transform_at(layer, self.position_ms).opacity)
             image = self._image_cache.get(layer.source_path or "") if layer.kind == "image" else None
             if image is not None:
                 painter.drawImage(rect, image)
