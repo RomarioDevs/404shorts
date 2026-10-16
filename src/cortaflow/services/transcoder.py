@@ -38,7 +38,6 @@ def export_clip(source: Path, destination: Path, clip: ClipRange, progress: Call
     try:
         while process.poll() is None:
             if cancelled and cancelled.is_set():
-                process.terminate()
                 raise ExportCancelled("Exportação cancelada.")
             if progress:
                 progress({"status": "processing"})
@@ -47,10 +46,24 @@ def export_clip(source: Path, destination: Path, clip: ClipRange, progress: Call
             except subprocess.TimeoutExpired:
                 continue
     except Exception:
+        _stop_process(process)
         if temporary.exists():
             temporary.unlink()
         raise
     return _finish_process(process, temporary, destination)
+
+
+def _stop_process(process: subprocess.Popen) -> None:
+    """Stop and reap FFmpeg so cancellation never leaves a child process behind."""
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+    # Drain pipes and reap the child even when termination was requested after exit.
+    process.communicate()
 
 
 def _finish_process(process: subprocess.Popen, temporary: Path, destination: Path) -> Path:
