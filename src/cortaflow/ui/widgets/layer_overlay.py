@@ -12,6 +12,9 @@ from cortaflow.domain.editing import LayerItem
 class LayerOverlay(QWidget):
     layer_selected = Signal(str)
     layer_moved = Signal(str, float, float)
+    preview_background_pressed = Signal(QPointF)
+    preview_background_moved = Signal(QPointF)
+    preview_background_released = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -23,6 +26,7 @@ class LayerOverlay(QWidget):
         self.selected_id: str | None = None
         self._drag_id: str | None = None
         self._drag_offset = QPointF()
+        self._background_dragging = False
         self._image_cache: dict[str, QImage] = {}
 
     def set_layers(self, layers: list[LayerItem]) -> None:
@@ -76,8 +80,13 @@ class LayerOverlay(QWidget):
                 self.layer_selected.emit(layer.item_id)
                 self.update()
                 return
+        self._background_dragging = True
+        self.preview_background_pressed.emit(point)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._background_dragging and event.buttons() & Qt.MouseButton.LeftButton:
+            self.preview_background_moved.emit(event.position())
+            return
         if not self._drag_id or not event.buttons() & Qt.MouseButton.LeftButton:
             return
         layer = next((item for item in self.layers if item.item_id == self._drag_id), None)
@@ -93,6 +102,9 @@ class LayerOverlay(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_id = None
+            if self._background_dragging:
+                self._background_dragging = False
+                self.preview_background_released.emit()
 
     def paintEvent(self, event: object) -> None:  # noqa: N802
         painter = QPainter(self)

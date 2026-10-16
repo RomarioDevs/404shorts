@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from pathlib import Path
 
-from PySide6.QtCore import QThreadPool, QUrl, Qt, Signal
+from PySide6.QtCore import QPointF, QThreadPool, QUrl, Qt, Signal
 from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, QUndoCommand, QUndoStack
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -200,6 +200,11 @@ class EditorPage(QWidget):
         self.layer_overlay = LayerOverlay()
         self.layer_overlay.layer_selected.connect(self._select_layer)
         self.layer_overlay.layer_moved.connect(self._move_layer)
+        self._crop_drag_active = False
+        self.layer_overlay.preview_background_pressed.connect(self._begin_crop_drag)
+        self.layer_overlay.preview_background_moved.connect(self._move_crop_drag)
+        self.layer_overlay.preview_background_released.connect(self._end_crop_drag)
+        self.reframe_overlay.crop_changed.connect(self._apply_dragged_crop)
         video_stack.addWidget(self.layer_overlay)
         preview_header = QFrame()
         preview_header.setObjectName("previewHeader")
@@ -405,6 +410,27 @@ class EditorPage(QWidget):
         self.reframe_overlay.set_settings(reframe)
         self._update_preview_format(reframe, export)
         self.settings_changed.emit((reframe, subtitle, audio, export))
+
+    def _begin_crop_drag(self, point: QPointF) -> None:
+        self._crop_drag_active = self.reframe_overlay.begin_drag(point)
+        if self._crop_drag_active:
+            self.layer_overlay.setCursor(Qt.CursorShape.SizeAllCursor)
+
+    def _move_crop_drag(self, point: QPointF) -> None:
+        if self._crop_drag_active:
+            self.reframe_overlay.move_drag(point)
+
+    def _end_crop_drag(self) -> None:
+        if self._crop_drag_active:
+            self.reframe_overlay.end_drag()
+        self._crop_drag_active = False
+        self.layer_overlay.unsetCursor()
+
+    def _apply_dragged_crop(self, crop: CropFrame) -> None:
+        self.properties.set_manual_crop_origin(crop.x, crop.y)
+        self.status_label.setText(
+            "Enquadramento ajustado. O modo automático foi desativado para manter este corte na exportação."
+        )
 
     @staticmethod
     def _control_button(text: str, handler: object) -> QPushButton:

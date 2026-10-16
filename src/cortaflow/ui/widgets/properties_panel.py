@@ -117,6 +117,8 @@ class PropertiesPanel(QWidget):
         self.aspect = QComboBox()
         self.aspect.addItems(["9:16", "16:9", "1:1", "4:5", "original"])
         self.crop_x, self.crop_y = self._spin(0, 20000), self._spin(0, 20000)
+        self.crop_x.setToolTip("A moldura do preview atualiza estes valores ao ser arrastada.")
+        self.crop_y.setToolTip("A moldura do preview atualiza estes valores ao ser arrastada.")
         self.zoom = self._double(0.25, 4, 0.05)
         self.smoothing = self._double(0, 1, 0.05)
         self.max_speed = self._spin(1, 1000)
@@ -315,6 +317,15 @@ class PropertiesPanel(QWidget):
     def set_watermark_settings(self, watermark: WatermarkSettings) -> None:
         """Keep watermark state when export settings are edited from either page."""
         self.watermark_settings = watermark.model_copy(deep=True)
+
+    def set_manual_crop_origin(self, x: int, y: int) -> None:
+        """Apply a dragged crop position and keep it fixed for the export."""
+        self._loading = True
+        self.crop_x.setValue(x)
+        self.crop_y.setValue(y)
+        self.reframe_auto.setChecked(False)
+        self._loading = False
+        self._emit_settings()
 
     def _emit_settings(self) -> None:
         if self._loading:
