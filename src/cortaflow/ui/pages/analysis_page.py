@@ -4,7 +4,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QThreadPool, Signal
+from PySide6.QtCore import QThreadPool, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -38,6 +38,7 @@ from cortaflow.services.speaker_analysis import (
     apply_speaker_overrides,
 )
 from cortaflow.services.auto_reframe import generate_speaker_reframe_keyframes
+from cortaflow.ui.widgets.face_diagnostics import FaceDiagnosticsDialog
 from cortaflow.workers.base_worker import FunctionWorker
 
 
@@ -62,6 +63,7 @@ class AnalysisPage(QWidget):
         self.reframe_keyframes: list[ReframeKeyframe] = []
         self.speaker_keyframes: list[SpeakerKeyframe] = []
         self.speaker_overrides: list[SpeakerOverride] = []
+        self.diagnostics_dialog: FaceDiagnosticsDialog | None = None
         self.selection_settings = ClipSelectionSettings()
         model_manager = SemanticModelManager(AppConfig().cache_dir / "models" / "semantic")
         ollama_assets = find_ollama_assets()
@@ -186,9 +188,12 @@ class AnalysisPage(QWidget):
         self.face_selector.addItem("Automático · maior rosto", None)
         self.apply_face_button = QPushButton("Acompanhar rosto selecionado")
         self.apply_face_button.clicked.connect(self.apply_face_selection)
+        self.diagnostics_button = QPushButton("Abrir diagnóstico visual")
+        self.diagnostics_button.clicked.connect(self.open_face_diagnostics)
         face_row.addWidget(self.analyze_faces_button)
         face_row.addWidget(self.face_selector)
         face_row.addWidget(self.apply_face_button)
+        face_row.addWidget(self.diagnostics_button)
         face_row.addStretch()
         layout.addLayout(face_row)
         self.face_status = QLabel(
@@ -505,6 +510,28 @@ class AnalysisPage(QWidget):
         self.face_analysis_finished.emit(
             (list(self.face_tracks), list(self.reframe_keyframes), self.face_selector.currentData())
         )
+        self._update_actions()
+
+    def open_face_diagnostics(self) -> None:
+        if not self.source_path or not self.face_tracks:
+            return
+        if self.diagnostics_dialog is None:
+            self.diagnostics_dialog = FaceDiagnosticsDialog(
+                self.source_path,
+                self.face_tracks,
+                self.speaker_keyframes,
+                self.source_width,
+                self.source_height,
+                self,
+            )
+            self.diagnostics_dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            self.diagnostics_dialog.destroyed.connect(lambda: setattr(self, "diagnostics_dialog", None))
+        else:
+            self.diagnostics_dialog.tracks = list(self.face_tracks)
+            self.diagnostics_dialog.set_speaker_keyframes(self.speaker_keyframes)
+        self.diagnostics_dialog.show()
+        self.diagnostics_dialog.raise_()
+        self.diagnostics_dialog.activateWindow()
 
     def apply_face_selection(self) -> None:
         if not self.face_tracks:
@@ -587,6 +614,8 @@ class AnalysisPage(QWidget):
     ) -> None:
         self.speaker_keyframes, self.reframe_keyframes = result
         self._finish_worker()
+        if self.diagnostics_dialog is not None:
+            self.diagnostics_dialog.set_speaker_keyframes(self.speaker_keyframes)
         uncertain = sum(item.uncertain for item in self.speaker_keyframes)
         switches = sum(
             previous.track_id is not None
@@ -671,6 +700,7 @@ class AnalysisPage(QWidget):
         self.analyze_faces_button.setEnabled(self.source_path is not None and not busy)
         self.apply_face_button.setEnabled(bool(self.face_tracks) and not busy)
         self.face_selector.setEnabled(bool(self.face_tracks) and not busy)
+        self.diagnostics_button.setEnabled(bool(self.face_tracks) and not busy)
         self.analyze_speaker_button.setEnabled(bool(self.face_tracks) and not busy)
         self.override_face.setEnabled(bool(self.face_tracks) and not busy)
         self.add_override_button.setEnabled(bool(self.face_tracks) and not busy)
