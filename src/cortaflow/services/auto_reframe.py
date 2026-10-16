@@ -101,6 +101,7 @@ def apply_reframe_settings(
         return list(keyframes)
     aspect = {
         "9:16": (9, 16),
+        "16:9": (16, 9),
         "1:1": (1, 1),
         "4:5": (4, 5),
         "original": (source_width, source_height),

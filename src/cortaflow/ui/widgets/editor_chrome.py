@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -122,15 +121,29 @@ class EditorResourcePanel(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("editorResourcePanel")
-        self.setMinimumWidth(292)
-        self.setMaximumWidth(360)
+        self.setMinimumWidth(350)
+        self.setMaximumWidth(480)
         self.buttons: dict[str, QToolButton] = {}
         self.current_resource = "media"
         self.current_media: Path | None = None
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(8)
+
+        rail = QWidget(self)
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(0, 3, 0, 3)
+        rail_layout.setSpacing(5)
+        rail.setFixedWidth(42)
+        layout.addWidget(rail)
+
+        content = QWidget(self)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(4, 4, 4, 4)
+        content_layout.setSpacing(8)
+        layout.addWidget(content, 1)
+        layout = content_layout
 
         top_row = QHBoxLayout()
         brand = QLabel("CortaFlow")
@@ -161,23 +174,18 @@ class EditorResourcePanel(QFrame):
         self.search.textChanged.connect(self._filter_cards)
         layout.addWidget(self.search)
 
-        category_grid = QGridLayout()
-        category_grid.setContentsMargins(0, 0, 0, 0)
-        category_grid.setHorizontalSpacing(4)
-        category_grid.setVerticalSpacing(4)
-        for index, (key, title, glyph) in enumerate(self._resources):
+        for key, title, glyph in self._resources:
             button = QToolButton(self)
             button.setObjectName("editorResourceButton")
-            button.setText(f"{glyph}  {title}")
+            button.setText(glyph)
             button.setToolTip(title)
             button.setCheckable(True)
             button.setAutoExclusive(True)
-            button.setMinimumHeight(30)
-            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            button.setFixedSize(36, 36)
             button.clicked.connect(lambda _checked=False, name=key: self._request(name))
             self.buttons[key] = button
-            category_grid.addWidget(button, index // 2, index % 2)
-        layout.addLayout(category_grid)
+            rail_layout.addWidget(button)
+        rail_layout.addStretch(1)
 
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
@@ -224,8 +232,7 @@ class EditorResourcePanel(QFrame):
 
     def set_media(self, path: Path | None) -> None:
         self.current_media = path.resolve() if path else None
-        if self.current_resource == "media":
-            self._render_resource_cards("media")
+        self._request("media")
 
     def _render_resource_cards(self, resource: str) -> None:
         while self.asset_grid.count():

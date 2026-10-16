@@ -84,6 +84,7 @@ class EditorPage(QWidget):
     media_import_requested = Signal()
     settings_changed = Signal(object)
     reframe_keyframes_changed = Signal(object)
+    automatic_requested = Signal()
     def __init__(self) -> None:
         super().__init__()
         self.source_path: Path | None = None
@@ -111,21 +112,27 @@ class EditorPage(QWidget):
         self.player.setVideoOutput(self.video)
         self.audio.setVolume(0.8)
 
-        root_layout = QHBoxLayout(self)
+        root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(8, 8, 8, 8)
-        root_layout.setSpacing(8)
+        root_layout.setSpacing(6)
+
+        top_workspace = QWidget()
+        top_layout = QHBoxLayout(top_workspace)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(6)
+        root_layout.addWidget(top_workspace, 3)
 
         self.resources = EditorResourcePanel()
         self.resources.resource_requested.connect(self._handle_resource_request)
         self.resources.import_requested.connect(self.media_import_requested)
-        root_layout.addWidget(self.resources)
+        top_layout.addWidget(self.resources)
 
         editor_body = QWidget()
         editor_body.setObjectName("editorWorkspace")
         layout = QVBoxLayout(editor_body)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-        root_layout.addWidget(editor_body, 1)
+        top_layout.addWidget(editor_body, 1)
 
         header = QFrame()
         header.setObjectName("editorHeader")
@@ -145,7 +152,9 @@ class EditorPage(QWidget):
         self.redo_button.setObjectName("editorIconButton")
         self.redo_button.setToolTip("Refazer (Ctrl+Shift+Z)")
         header_layout.addWidget(self.redo_button)
+        # Keep the status widgets alive for state updates without spending canvas height.
         layout.addWidget(header)
+        header.hide()
 
         self.video_container = QWidget()
         self.video_container.setObjectName("previewSurface")
@@ -254,8 +263,6 @@ class EditorPage(QWidget):
         self.timeline_mode_label = QLabel("Vídeo · Áudio · Legendas · Cenas · IA")
         self.timeline_mode_label.setObjectName("previewMeta")
         timeline_header_layout.addWidget(self.timeline_mode_label)
-        layout.addWidget(timeline_header)
-
         self.timeline = TimelineWidget()
         self.timeline.setObjectName("editorTimeline")
         self.timeline.seek_requested.connect(self.player.setPosition)
@@ -263,7 +270,6 @@ class EditorPage(QWidget):
         self.timeline.selection_changed.connect(self._selection_changed)
         self.timeline.clip_move_requested.connect(self.move_selected_clip)
         self.timeline.clip_trim_requested.connect(self.trim_selected_clip)
-        layout.addWidget(self.timeline)
 
         inspector_header = QFrame()
         inspector_header.setObjectName("inspectorHeader")
@@ -290,7 +296,16 @@ class EditorPage(QWidget):
         properties_layout.addWidget(self.properties, 1)
         properties_column.setMinimumWidth(340)
         properties_column.setMaximumWidth(420)
-        root_layout.addWidget(properties_column)
+        top_layout.addWidget(properties_column)
+
+        timeline_workspace = QFrame()
+        timeline_workspace.setObjectName("timelineWorkspace")
+        timeline_layout = QVBoxLayout(timeline_workspace)
+        timeline_layout.setContentsMargins(8, 6, 8, 6)
+        timeline_layout.setSpacing(4)
+        timeline_layout.addWidget(timeline_header)
+        timeline_layout.addWidget(self.timeline, 1)
+        root_layout.addWidget(timeline_workspace, 2)
 
         self.undo_stack.canUndoChanged.connect(self.undo_button.setEnabled)
         self.undo_stack.canRedoChanged.connect(self.redo_button.setEnabled)
@@ -325,6 +340,7 @@ class EditorPage(QWidget):
         handlers = {
             "text": self.add_text_layer,
             "image": self.add_image_layer,
+            "ai": self.automatic_requested.emit,
         }
         handler = handlers.get(resource)
         if handler is not None:
@@ -443,8 +459,9 @@ class EditorPage(QWidget):
         sequence=None,
     ) -> None:
         self.timeline_clips = list(timeline_clips)
-        self.selected_clip_id = None
-        self.selected_clip_ids.clear()
+        selected_clip = next((item for item in self.timeline_clips if item.track == "video"), None)
+        self.selected_clip_id = selected_clip.clip_id if selected_clip else None
+        self.selected_clip_ids = {self.selected_clip_id} if self.selected_clip_id else set()
         self.layers = list(layers or [])
         self.sequence = sequence
         self.sequence_badge.setText("SEQUÊNCIA ATIVA" if sequence is not None else "RASCUNHO")
@@ -463,6 +480,8 @@ class EditorPage(QWidget):
             suggestions=suggestions,
             reframe=reframe_keyframes,
         )
+        self.timeline.select_clips(sorted(self.selected_clip_ids))
+        self.properties.set_selected_clip(selected_clip)
         self.properties.set_settings(
             reframe_settings,
             subtitle_style,
@@ -763,7 +782,7 @@ class EditorPage(QWidget):
         if not self.source_width or not self.source_height:
             return
         settings = self.properties
-        ratios = {"9:16": (9, 16), "1:1": (1, 1), "4:5": (4, 5)}
+        ratios = {"9:16": (9, 16), "16:9": (16, 9), "1:1": (1, 1), "4:5": (4, 5)}
         if settings.aspect.currentText() == "original":
             width, height = self.source_width, self.source_height
         else:

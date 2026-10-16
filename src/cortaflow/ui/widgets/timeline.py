@@ -378,10 +378,10 @@ class TimelineWidget(QWidget):
         self.zoom.valueChanged.connect(self.canvas.set_zoom)
         self.scroll = QScrollArea()
         self.scroll.setWidget(self.canvas)
-        self.scroll.setWidgetResizable(False)
+        self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setFixedHeight(self.canvas.minimumHeight() + 22)
+        self.scroll.setMinimumHeight(240)
         layout.addWidget(self.scroll)
 
     def set_duration(self, duration_ms: int) -> None:

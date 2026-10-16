@@ -156,10 +156,15 @@ def output_dimensions(
 ) -> tuple[int, int]:
     """Resolve final or preview dimensions from the persisted aspect ratio."""
     aspect = reframe.aspect_ratio if reframe else "9:16"
-    if aspect == "1:1":
-        width, height = settings.width, settings.width
+    short_edge, long_edge = sorted((settings.width, settings.height))
+    if aspect == "16:9":
+        width, height = long_edge, short_edge
+    elif aspect == "9:16":
+        width, height = short_edge, long_edge
+    elif aspect == "1:1":
+        width, height = short_edge, short_edge
     elif aspect == "4:5":
-        width, height = settings.width, round(settings.width * 5 / 4)
+        width, height = short_edge, round(short_edge * 5 / 4)
     elif aspect == "original" and source_size and min(source_size) > 0:
         width, height = source_size
     else:

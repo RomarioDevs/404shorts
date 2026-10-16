@@ -123,7 +123,7 @@ class AudioSettings(BaseModel):
 
 
 class ReframeSettings(BaseModel):
-    aspect_ratio: Literal["9:16", "1:1", "4:5", "original"] = "9:16"
+    aspect_ratio: Literal["9:16", "16:9", "1:1", "4:5", "original"] = "9:16"
     x: int = Field(default=0, ge=0)
     y: int = Field(default=0, ge=0)
     zoom: float = Field(default=1.0, ge=0.25, le=4)

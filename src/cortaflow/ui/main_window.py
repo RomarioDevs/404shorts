@@ -68,6 +68,8 @@ class MainWindow(QMainWindow):
         self._create_toolbar()
         self._create_status_bar()
         self._apply_theme()
+        self.navigation.currentRowChanged.connect(self._update_editor_chrome)
+        self._update_editor_chrome(self.navigation.currentRow())
         self.autosave_timer = QTimer(self)
         self.autosave_timer.setInterval(30_000)
         self.autosave_timer.timeout.connect(self._autosave)
@@ -103,6 +105,7 @@ class MainWindow(QMainWindow):
 
     def _create_toolbar(self) -> None:
         toolbar = QToolBar("Ferramentas principais", self)
+        self.main_toolbar = toolbar
         toolbar.setMovable(False)
         new_action = toolbar.addAction("Novo projeto")
         new_action.triggered.connect(self._new_project)
@@ -133,11 +136,21 @@ class MainWindow(QMainWindow):
             f"{compute_status.device.upper()} · {compute_status.compute_type}  "
         )
         device_label.setToolTip(compute_status.detail)
-        toolbar.addWidget(device_label)
-        export_button = QPushButton("Salvar cortes")
+        device_action = toolbar.addWidget(device_label)
+        export_button = QPushButton("Exportar")
         export_button.clicked.connect(self.export_action.trigger)
-        toolbar.addWidget(export_button)
+        self.toolbar_export_item = toolbar.addWidget(export_button)
+        self.toolbar_compact_items = (save_as, settings_action, help_action, about_action)
+        self.toolbar_utility_items = (self.automatic_action, self.cancel_automatic_action)
+        self.toolbar_device_item = device_action
         self.addToolBar(toolbar)
+
+    def _update_editor_chrome(self, page_index: int) -> None:
+        """Give the full editor the canvas width used by a dedicated editing workspace."""
+        editing = page_index == 3
+        self.navigation.setVisible(not editing)
+        for item in (*self.toolbar_compact_items, *self.toolbar_utility_items, self.toolbar_device_item):
+            item.setVisible(not editing)
 
     def _create_central_area(self) -> None:
         container = QWidget()
@@ -194,6 +207,7 @@ class MainWindow(QMainWindow):
         self.editor_page.sequence_export_requested.connect(self._export_editor_sequence)
         self.editor_page.settings_changed.connect(self._editor_settings_changed)
         self.editor_page.reframe_keyframes_changed.connect(self._editor_reframe_changed)
+        self.editor_page.automatic_requested.connect(self._start_automatic_pipeline)
         self.export_page.settings_changed.connect(self._export_settings_changed)
         self.export_page.cues_changed.connect(self._export_cues_changed)
         self.export_page.reframe_edit_requested.connect(self._open_export_reframe)
@@ -897,6 +911,7 @@ class MainWindow(QMainWindow):
                 padding: 2px; font-size: 17px; }
             #previewSurface { background: #08090c; border: 1px solid #2c3340; border-radius: 8px; }
             #editorTimeline { background: #171a21; border: 1px solid #292f3b; border-radius: 8px; }
+            #timelineWorkspace { background: #15171b; border: 1px solid #292d33; border-radius: 8px; }
             #propertiesColumn { background: #171a21; border: 1px solid #292f3b; border-radius: 8px; }
             #editorInspector { background: #171a21; border: 0; }
             #editorToolRail { background: #1b1e27; border: 1px solid #292f3b; border-radius: 10px; }

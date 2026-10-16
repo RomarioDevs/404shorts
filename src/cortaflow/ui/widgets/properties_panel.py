@@ -111,7 +111,7 @@ class PropertiesPanel(QWidget):
     def _create_reframe_tab(self) -> None:
         page, form = self._form_page()
         self.aspect = QComboBox()
-        self.aspect.addItems(["9:16", "1:1", "4:5", "original"])
+        self.aspect.addItems(["9:16", "16:9", "1:1", "4:5", "original"])
         self.crop_x, self.crop_y = self._spin(0, 20000), self._spin(0, 20000)
         self.zoom = self._double(0.25, 4, 0.05)
         self.smoothing = self._double(0, 1, 0.05)
@@ -191,7 +191,11 @@ class PropertiesPanel(QWidget):
     def _create_export_tab(self) -> None:
         page, form = self._form_page()
         self.resolution = QComboBox()
+        self.resolution.addItem("1920 × 1080", (1920, 1080))
         self.resolution.addItem("1080 × 1920", (1080, 1920))
+        self.resolution.addItem("1080 × 1350", (1080, 1350))
+        self.resolution.addItem("1080 × 1080", (1080, 1080))
+        self.resolution.addItem("1280 × 720", (1280, 720))
         self.resolution.addItem("720 × 1280", (720, 1280))
         self.codec = QComboBox()
         self.codec.addItem("H.264", "h264")
