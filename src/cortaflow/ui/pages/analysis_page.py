@@ -575,7 +575,11 @@ class AnalysisPage(QWidget):
         elif state.get("status") == "speaker":
             track_id = state.get("track_id")
             label = f"rosto {track_id}" if track_id else "incerto/grupo"
-            self.speaker_status.setText(f"Correlacionando evidências · foco atual: {label}")
+            confidence = float(state.get("confidence", 0) or 0)
+            self.speaker_status.setText(
+                f"Correlacionando evidências · foco atual: {label} · "
+                f"confiança {confidence:.0%}"
+            )
 
     def _speaker_finished(
         self,
@@ -584,8 +588,20 @@ class AnalysisPage(QWidget):
         self.speaker_keyframes, self.reframe_keyframes = result
         self._finish_worker()
         uncertain = sum(item.uncertain for item in self.speaker_keyframes)
+        switches = sum(
+            previous.track_id is not None
+            and current.track_id is not None
+            and previous.track_id != current.track_id
+            for previous, current in zip(self.speaker_keyframes, self.speaker_keyframes[1:])
+        )
+        average_confidence = (
+            sum(item.confidence for item in self.speaker_keyframes) / len(self.speaker_keyframes)
+            if self.speaker_keyframes else 0
+        )
         self.speaker_status.setText(
-            f"Análise concluída · {uncertain} decisões incertas de {len(self.speaker_keyframes)}."
+            f"Análise concluída · confiança média {average_confidence:.0%} · "
+            f"{uncertain} decisões incertas de {len(self.speaker_keyframes)} · "
+            f"{switches} troca(s) de falante."
         )
         self.speaker_analysis_finished.emit(
             (list(self.speaker_keyframes), list(self.reframe_keyframes))
