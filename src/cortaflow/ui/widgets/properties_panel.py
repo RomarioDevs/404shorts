@@ -81,6 +81,8 @@ class PropertiesPanel(QWidget):
     def _create_layer_tab(self) -> None:
         page, form = self._form_page()
         self.layer_label = QLabel("Nenhuma camada selecionada")
+        self.layer_timeline_start = self._spin(0, 86_400_000)
+        self.layer_timeline_end = self._spin(1, 86_400_000)
         self.layer_text = QLineEdit()
         self.layer_font = QLineEdit("Arial")
         self.layer_font_size = self._spin(8, 240)
@@ -95,6 +97,8 @@ class PropertiesPanel(QWidget):
         keyframe_button = QPushButton("Adicionar keyframe no cursor")
         keyframe_button.clicked.connect(self.layer_keyframe_requested)
         form.addRow(self.layer_label)
+        form.addRow("Início na timeline (ms)", self.layer_timeline_start)
+        form.addRow("Fim na timeline (ms)", self.layer_timeline_end)
         form.addRow("Texto", self.layer_text)
         form.addRow("Fonte", self.layer_font)
         form.addRow("Tamanho", self.layer_font_size)
@@ -273,6 +277,8 @@ class PropertiesPanel(QWidget):
             self.layer_text.clear()
         else:
             self.layer_label.setText(f"{layer.kind.title()} · {layer.item_id}")
+            self.layer_timeline_start.setValue(layer.timeline_start_ms)
+            self.layer_timeline_end.setValue(layer.timeline_end_ms)
             self.layer_text.setText(layer.text)
             self.layer_font.setText(layer.font_name)
             self.layer_font_size.setValue(layer.font_size)
@@ -287,9 +293,13 @@ class PropertiesPanel(QWidget):
     def _emit_layer_update(self) -> None:
         if self._loading or self.selected_layer is None:
             return
+        if self.layer_timeline_end.value() <= self.layer_timeline_start.value():
+            return
         self.layer_update_requested.emit(
             {
                 "item_id": self.selected_layer.item_id,
+                "timeline_start_ms": self.layer_timeline_start.value(),
+                "timeline_end_ms": self.layer_timeline_end.value(),
                 "text": self.layer_text.text(),
                 "font_name": self.layer_font.text().strip() or "Arial",
                 "font_size": self.layer_font_size.value(),

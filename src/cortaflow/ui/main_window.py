@@ -543,6 +543,7 @@ class MainWindow(QMainWindow):
             scenes=self.project.scenes,
             suggestions=self.project.suggestions,
             reframe=self.project.reframe_keyframes,
+            layers=self.project.layers,
         )
 
     def _suggestion_saved(self, suggestion) -> None:

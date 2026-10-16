@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QImage, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from cortaflow.domain.editing import LayerItem
@@ -23,9 +23,19 @@ class LayerOverlay(QWidget):
         self.selected_id: str | None = None
         self._drag_id: str | None = None
         self._drag_offset = QPointF()
+        self._image_cache: dict[str, QImage] = {}
 
     def set_layers(self, layers: list[LayerItem]) -> None:
         self.layers = list(layers)
+        image_cache: dict[str, QImage] = {}
+        for layer in self.layers:
+            if layer.kind == "image" and layer.source_path:
+                image = self._image_cache.get(layer.source_path)
+                if image is None:
+                    image = QImage(layer.source_path)
+                if not image.isNull():
+                    image_cache[layer.source_path] = image
+        self._image_cache = image_cache
         self.update()
 
     def set_position(self, position_ms: int) -> None:
@@ -89,16 +99,22 @@ class LayerOverlay(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         for layer in self._visible_layers():
             left, top, width, height = self._rect(layer)
-            rect = painter.boundingRect(int(left), int(top), max(1, int(width)), max(1, int(height)), Qt.AlignmentFlag.AlignCenter, layer.text)
-            if layer.kind == "image" and layer.source_path:
-                painter.fillRect(left, top, width, height, QColor(24, 28, 40, 150))
-                label = "IMAGEM"
+            rect = QRectF(left, top, width, height)
+            painter.save()
+            painter.setOpacity(layer.opacity)
+            image = self._image_cache.get(layer.source_path or "") if layer.kind == "image" else None
+            if image is not None:
+                painter.drawImage(rect, image)
+            elif layer.kind == "image":
+                painter.fillRect(rect, QColor(24, 28, 40, 150))
+                painter.setPen(QColor(layer.color))
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "Imagem indisponível")
             else:
-                painter.fillRect(left, top, width, height, QColor(20, 24, 32, 130 if layer.background else 35))
-                label = layer.text
-            painter.setFont(QFont(layer.font_name, max(8, round(layer.font_size * self.height() / 1080))))
-            painter.setPen(QColor(layer.color))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, label)
+                painter.fillRect(rect, QColor(20, 24, 32, 130 if layer.background else 35))
+                painter.setFont(QFont(layer.font_name, max(8, round(layer.font_size * self.height() / 1080))))
+                painter.setPen(QColor(layer.color))
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, layer.text)
+            painter.restore()
             if layer.item_id == self.selected_id:
                 painter.setPen(QPen(QColor("#55d6a8"), 2, Qt.PenStyle.DashLine))
                 painter.drawRect(left, top, width, height)

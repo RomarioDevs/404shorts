@@ -8,11 +8,12 @@ from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QRubberBand, QScrollArea, QSlider, QVBoxLayout, QWidget
 
 from cortaflow.domain.clip import format_timestamp
-from cortaflow.domain.editing import TimelineClip
+from cortaflow.domain.editing import LayerItem, TimelineClip
 
 TRACKS = (
     ("video", "VÍDEO", QColor("#38445d")),
     ("audio", "ÁUDIO", QColor("#28354b")),
+    ("layers", "CAMADAS", QColor("#514070")),
     ("transcript", "TRANSCRIÇÃO", QColor("#3d344f")),
     ("subtitles", "LEGENDAS", QColor("#4b3b35")),
     ("scenes", "CENAS", QColor("#2f4540")),
@@ -24,6 +25,7 @@ TRACKS = (
 class TimelineCanvas(QWidget):
     seek_requested = Signal(int)
     clip_selected = Signal(str)
+    layer_selected = Signal(object)
     selection_changed = Signal(object)
     clip_move_requested = Signal(str, int)
     clip_trim_requested = Signal(str, str, int)
@@ -42,6 +44,7 @@ class TimelineCanvas(QWidget):
         self.track_items: dict[str, list[Any]] = {name: [] for name, _, _ in TRACKS}
         self.selected_clip_id: str | None = None
         self.selected_clip_ids: set[str] = set()
+        self.selected_layer_id: str | None = None
         self.thumbnail_paths: list[str] = []
         self.waveform: list[float] = []
         self.track_order = [name for name, _, _ in TRACKS]
@@ -82,6 +85,7 @@ class TimelineCanvas(QWidget):
         scenes: list[Any] | None = None,
         suggestions: list[Any] | None = None,
         reframe: list[Any] | None = None,
+        layers: list[LayerItem] | None = None,
     ) -> None:
         self.clips = list(clips)
         self.track_items["video"] = [clip for clip in clips if clip.track == "video"]
@@ -91,6 +95,7 @@ class TimelineCanvas(QWidget):
         self.track_items["scenes"] = list(scenes or [])
         self.track_items["suggestions"] = list(suggestions or [])
         self.track_items["reframe"] = list(reframe or [])
+        self.track_items["layers"] = list(layers or [])
         self.update()
 
     def set_media_previews(self, thumbnails: list[str], waveform: list[float]) -> None:
@@ -120,6 +125,10 @@ class TimelineCanvas(QWidget):
         self.selected_clip_ids = {clip_id} if clip_id else set()
         self.update()
 
+    def select_layer(self, item_id: str | None) -> None:
+        self.selected_layer_id = item_id
+        self.update()
+
     def position_to_x(self, position_ms: int) -> float:
         return self.track_left + max(0, position_ms) * self.pixels_per_second / 1000
 
@@ -131,6 +140,13 @@ class TimelineCanvas(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         position = self.x_to_position(event.position().x())
+        layer = self._layer_at(event.position().x(), event.position().y())
+        if layer is not None:
+            self.selected_layer_id = layer.item_id
+            self.layer_selected.emit(layer.item_id)
+            self.seek_requested.emit(position)
+            self.update()
+            return
         clip = self._clip_at(event.position().x(), event.position().y())
         if clip:
             additive = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
@@ -157,6 +173,8 @@ class TimelineCanvas(QWidget):
             self.clip_selected.emit(clip.clip_id)
             self.update()
         elif not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.selected_layer_id = None
+            self.layer_selected.emit(None)
             self.selected_clip_id = None
             self.selected_clip_ids.clear()
             self.selection_changed.emit([])
@@ -250,7 +268,9 @@ class TimelineCanvas(QWidget):
                 max(3, self.position_to_x(end) - self.position_to_x(start)),
                 self.track_height - 10,
             )
-            selected = isinstance(item, TimelineClip) and item.clip_id in self.selected_clip_ids
+            selected = (
+                isinstance(item, TimelineClip) and item.clip_id in self.selected_clip_ids
+            ) or (isinstance(item, LayerItem) and item.item_id == self.selected_layer_id)
             painter.fillRect(rect, color.lighter(125) if selected else color)
             if name == "video" and self.thumbnail_paths:
                 index = int(start / max(1, self.duration_ms) * len(self.thumbnail_paths)) % len(self.thumbnail_paths)
@@ -285,6 +305,8 @@ class TimelineCanvas(QWidget):
     def _item_values(name: str, item: Any) -> tuple[int, int, str]:
         if isinstance(item, TimelineClip):
             return item.timeline_start_ms, item.timeline_end_ms, item.label
+        if isinstance(item, LayerItem):
+            return item.timeline_start_ms, item.timeline_end_ms, item.text or "Imagem"
         start = int(getattr(item, "start_ms", getattr(item, "timestamp_ms", 0)))
         end = int(getattr(item, "end_ms", start + 120))
         if name == "reframe":
@@ -310,6 +332,22 @@ class TimelineCanvas(QWidget):
                 )
         return None
 
+    def _layer_at(self, x: float, y: float) -> LayerItem | None:
+        if not self.track_visible["layers"]:
+            return None
+        position = self.x_to_position(x)
+        visible_tracks = [name for name in self.track_order if self.track_visible[name]]
+        top = self.ruler_height + visible_tracks.index("layers") * self.track_height
+        if not top <= y <= top + self.track_height:
+            return None
+        return next(
+            (
+                layer for layer in reversed(self.track_items["layers"])
+                if layer.timeline_start_ms <= position <= layer.timeline_end_ms
+            ),
+            None,
+        )
+
     def _draw_marker(self, painter: QPainter, position_ms: int | None, color: QColor) -> None:
         if position_ms is None:
             return
@@ -325,6 +363,7 @@ class TimelineCanvas(QWidget):
 class TimelineWidget(QWidget):
     seek_requested = Signal(int)
     clip_selected = Signal(str)
+    layer_selected = Signal(object)
     selection_changed = Signal(object)
     clip_move_requested = Signal(str, int)
     clip_trim_requested = Signal(str, str, int)
@@ -379,6 +418,7 @@ class TimelineWidget(QWidget):
         self.canvas = TimelineCanvas()
         self.canvas.seek_requested.connect(self.seek_requested)
         self.canvas.clip_selected.connect(self.clip_selected)
+        self.canvas.layer_selected.connect(self.layer_selected)
         self.canvas.selection_changed.connect(self.selection_changed)
         self.canvas.clip_move_requested.connect(self.clip_move_requested)
         self.canvas.clip_trim_requested.connect(self.clip_trim_requested)
@@ -418,8 +458,13 @@ class TimelineWidget(QWidget):
         self.canvas.selected_clip_id = clip_ids[-1] if clip_ids else None
         self.canvas.update()
 
+    def select_layer(self, item_id: str | None) -> None:
+        self.canvas.select_layer(item_id)
+
     def _clear_selection(self) -> None:
         self.canvas.selected_clip_ids.clear()
         self.canvas.selected_clip_id = None
+        self.canvas.select_layer(None)
         self.canvas.selection_changed.emit([])
+        self.canvas.layer_selected.emit(None)
         self.canvas.update()
