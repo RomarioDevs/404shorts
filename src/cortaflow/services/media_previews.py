@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from cortaflow.infrastructure.ffmpeg import find_executable
+from cortaflow.infrastructure.ffmpeg import find_executable, hidden_console_options
 
 
 def build_media_preview_data(
@@ -33,7 +33,7 @@ def build_media_preview_data(
                 "-ss", f"{timestamp:.3f}", "-i", str(source.resolve()),
                 "-frames:v", "1", "-vf", "scale=240:-2", str(output),
             ]
-            subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+            subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False, **hidden_console_options())
             if output.is_file():
                 # Copy bytes into a stable cache file owned by the caller's temp lifetime.
                 stable = Path.cwd() / ".cortaflow-preview-cache"
@@ -50,7 +50,7 @@ def _extract_waveform(source: Path, duration_ms: int, samples: int = 240) -> lis
         str(find_executable("ffmpeg")), "-hide_banner", "-loglevel", "error",
         "-i", str(source.resolve()), "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1",
     ]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, **hidden_console_options())
     raw = result.stdout
     if not raw:
         return []

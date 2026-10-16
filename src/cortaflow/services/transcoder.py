@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import Event
 
 from cortaflow.domain.clip import ClipRange, format_timestamp
-from cortaflow.infrastructure.ffmpeg import find_executable
+from cortaflow.infrastructure.ffmpeg import find_executable, hidden_console_options
 
 
 class ExportCancelled(RuntimeError):
@@ -34,7 +34,7 @@ def export_clip(source: Path, destination: Path, clip: ClipRange, progress: Call
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.stem}.partial{destination.suffix}")
     command = build_clip_command(source, temporary, clip)
-    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", shell=False)
+    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", shell=False, **hidden_console_options())
     try:
         while process.poll() is None:
             if cancelled and cancelled.is_set():

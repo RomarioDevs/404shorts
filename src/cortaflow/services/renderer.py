@@ -12,13 +12,13 @@ from cortaflow.domain.editing import AudioSettings, LayerItem, ReframeSettings, 
 from cortaflow.domain.project import ExportSettings, WatermarkSettings
 from cortaflow.domain.project import ReframeKeyframe
 from cortaflow.domain.tracking import CropFrame
-from cortaflow.infrastructure.ffmpeg import find_executable
+from cortaflow.infrastructure.ffmpeg import find_executable, hidden_console_options
 from cortaflow.services.auto_reframe import apply_reframe_settings
 from cortaflow.services.transcoder import ExportCancelled
 
 
 def available_encoders() -> set[str]:
-    result = subprocess.run([str(find_executable("ffmpeg")), "-hide_banner", "-encoders"], capture_output=True, text=True, encoding="utf-8", errors="replace", shell=False, check=False)
+    result = subprocess.run([str(find_executable("ffmpeg")), "-hide_banner", "-encoders"], capture_output=True, text=True, encoding="utf-8", errors="replace", shell=False, check=False, **hidden_console_options())
     return {name for name in ("h264_nvenc", "hevc_nvenc", "libx264", "libx265") if name in result.stdout}
 
 
@@ -659,6 +659,7 @@ def _run_render_process(
         encoding="utf-8",
         errors="replace",
         shell=False,
+        **hidden_console_options(),
     )
     return _monitor_render_process(process, encoder, progress, cancelled)
 
@@ -701,6 +702,7 @@ def _render_attempt(
         encoding="utf-8",
         errors="replace",
         shell=False,
+        **hidden_console_options(),
     )
     return _monitor_render_process(process, encoder, progress, cancelled)
 

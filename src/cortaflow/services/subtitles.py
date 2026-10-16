@@ -13,7 +13,7 @@ import pysubs2
 from cortaflow.domain.subtitle import SubtitleCue, Transcript, TranscriptWord
 from cortaflow.domain.clip import ClipRange
 from cortaflow.domain.editing import SubtitleStyle
-from cortaflow.infrastructure.ffmpeg import find_executable
+from cortaflow.infrastructure.ffmpeg import find_executable, hidden_console_options
 from cortaflow.services.transcoder import ExportCancelled
 
 
@@ -359,6 +359,7 @@ def burn_subtitles(
             encoding="utf-8",
             errors="replace",
             shell=False,
+            **hidden_console_options(),
         )
         state: dict[str, str] = {}
         try:

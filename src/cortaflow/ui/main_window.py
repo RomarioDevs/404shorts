@@ -146,9 +146,9 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
     def _update_editor_chrome(self, page_index: int) -> None:
-        """Give the full editor the canvas width used by a dedicated editing workspace."""
+        """Keep app navigation available while simplifying the editor toolbar."""
         editing = page_index == 3
-        self.navigation.setVisible(not editing)
+        self.navigation.setVisible(True)
         for item in (*self.toolbar_compact_items, *self.toolbar_utility_items, self.toolbar_device_item):
             item.setVisible(not editing)
 

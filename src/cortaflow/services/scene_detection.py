@@ -10,7 +10,7 @@ from typing import Any
 from scenedetect import AdaptiveDetector, SceneManager, open_video
 
 from cortaflow.domain.analysis import TimeRange
-from cortaflow.infrastructure.ffmpeg import find_executable
+from cortaflow.infrastructure.ffmpeg import find_executable, hidden_console_options
 
 
 class AnalysisCancelled(RuntimeError):
@@ -105,6 +105,7 @@ def detect_silences(
         encoding="utf-8",
         errors="replace",
         shell=False,
+        **hidden_console_options(),
     )
     communication: list[tuple[str, str]] = []
 
