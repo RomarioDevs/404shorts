@@ -39,7 +39,7 @@ def split_at(clips: list[TimelineClip], position_ms: int) -> list[TimelineClip]:
             continue
         changed = True
         offset = position_ms - clip.timeline_start_ms
-        split_source = clip.source_start_ms + offset
+        split_source = clip.source_start_ms + round(offset * clip.speed)
         result.extend(
             (
                 _updated(clip, source_end_ms=split_source),
@@ -154,6 +154,16 @@ def set_transition(clips: list[TimelineClip], clip_id: str, duration_ms: int) ->
     if not found:
         raise ValueError("Clipe não encontrado.")
     return result
+
+
+def update_clip_properties(clips: list[TimelineClip], clip_id: str, **updates: object) -> list[TimelineClip]:
+    """Update speed, fades, effect and other persisted clip properties atomically."""
+    if not any(clip.clip_id == clip_id for clip in clips):
+        raise ValueError("Clipe não encontrado.")
+    return [
+        _updated(clip, **updates) if clip.clip_id == clip_id else clip
+        for clip in clips
+    ]
 
 
 def _updated(clip: TimelineClip, **changes: object) -> TimelineClip:

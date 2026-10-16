@@ -18,7 +18,7 @@ def test_editor_exposes_basic_playback_controls(qtbot, tmp_path: Path) -> None:
     assert page.player.playbackRate() == 2.0
     page.mute_button.setChecked(True)
     assert page.audio.isMuted()
-    assert len(page.shortcuts) == 12
+    assert len(page.shortcuts) == 15
 
 
 def test_export_selection_runs_in_worker(qtbot, monkeypatch, tmp_path: Path) -> None:

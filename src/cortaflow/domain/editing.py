@@ -5,6 +5,17 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
+class TransformKeyframe(BaseModel):
+    """Transformação visual interpolável de uma camada em um instante."""
+
+    timestamp_ms: int = Field(ge=0)
+    x_percent: float = Field(default=50, ge=0, le=100)
+    y_percent: float = Field(default=50, ge=0, le=100)
+    scale: float = Field(default=1, ge=0.05, le=10)
+    rotation: float = Field(default=0, ge=-360, le=360)
+    opacity: float = Field(default=1, ge=0, le=1)
+
+
 class LayerItem(BaseModel):
     """Objeto visual não destrutivo posicionado sobre a sequência."""
 
@@ -25,6 +36,7 @@ class LayerItem(BaseModel):
     rotation: float = Field(default=0, ge=-360, le=360)
     opacity: float = Field(default=1, ge=0, le=1)
     visible: bool = True
+    keyframes: list[TransformKeyframe] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_duration(self) -> "LayerItem":
@@ -66,6 +78,10 @@ class TimelineClip(BaseModel):
     timeline_start_ms: int = Field(ge=0)
     label: str = "Clipe"
     transition_ms: int = Field(default=0, ge=0, le=5000)
+    speed: float = Field(default=1.0, ge=0.25, le=4.0)
+    fade_in_ms: int = Field(default=0, ge=0, le=5000)
+    fade_out_ms: int = Field(default=0, ge=0, le=5000)
+    effect: Literal["none", "blur", "grayscale", "vintage"] = "none"
 
     @model_validator(mode="after")
     def validate_range(self) -> "TimelineClip":
@@ -73,11 +89,13 @@ class TimelineClip(BaseModel):
             raise ValueError("O fim do clipe deve ser posterior ao início.")
         if self.transition_ms > self.duration_ms:
             raise ValueError("A transição não pode exceder a duração do clipe.")
+        if self.fade_in_ms + self.fade_out_ms > self.duration_ms:
+            raise ValueError("Os fades não podem exceder a duração do clipe.")
         return self
 
     @property
     def duration_ms(self) -> int:
-        return self.source_end_ms - self.source_start_ms
+        return max(1, round((self.source_end_ms - self.source_start_ms) / self.speed))
 
     @property
     def timeline_end_ms(self) -> int:
