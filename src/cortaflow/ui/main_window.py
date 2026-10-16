@@ -35,6 +35,7 @@ from cortaflow.services.project_service import (
 from cortaflow.services.editor_operations import create_initial_clips
 from cortaflow.services.sequence_operations import create_sequence_from_suggestion
 from cortaflow.services.automatic_pipeline import create_automatic_cuts
+from cortaflow.services.media_previews import stop_and_clear_media_preview_cache
 from cortaflow.services.face_detection import find_local_face_landmarker
 from cortaflow.services.transcription import (
     FasterWhisperTranscriber,
@@ -74,6 +75,14 @@ class MainWindow(QMainWindow):
         self.autosave_timer.setInterval(30_000)
         self.autosave_timer.timeout.connect(self._autosave)
         self.autosave_timer.start()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt virtual method
+        self.autosave_timer.stop()
+        preview_worker = getattr(self.editor_page, "preview_worker", None)
+        if preview_worker is not None:
+            preview_worker.cancel()
+        stop_and_clear_media_preview_cache()
+        super().closeEvent(event)
 
     def _create_actions(self) -> None:
         self.save_action = QAction("Salvar", self)

@@ -20,6 +20,7 @@ class LayerOverlay(QWidget):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.setMouseTracking(True)
+        self.setToolTip("Arraste dentro da moldura roxa para ajustar o corte. Segure Alt para arrastar sobre uma camada.")
         self.layers: list[LayerItem] = []
         self.position_ms = 0
         self.duration_ms = 1
@@ -71,15 +72,17 @@ class LayerOverlay(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         point = event.position()
-        for layer in reversed(self._visible_layers()):
-            left, top, width, height = self._rect(layer)
-            if left <= point.x() <= left + width and top <= point.y() <= top + height:
-                self.selected_id = layer.item_id
-                self._drag_id = layer.item_id
-                self._drag_offset = QPointF(point.x() - left, point.y() - top)
-                self.layer_selected.emit(layer.item_id)
-                self.update()
-                return
+        force_crop_drag = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+        if not force_crop_drag:
+            for layer in reversed(self._visible_layers()):
+                left, top, width, height = self._rect(layer)
+                if left <= point.x() <= left + width and top <= point.y() <= top + height:
+                    self.selected_id = layer.item_id
+                    self._drag_id = layer.item_id
+                    self._drag_offset = QPointF(point.x() - left, point.y() - top)
+                    self.layer_selected.emit(layer.item_id)
+                    self.update()
+                    return
         self._background_dragging = True
         self.preview_background_pressed.emit(point)
 

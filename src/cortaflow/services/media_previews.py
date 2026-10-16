@@ -2,12 +2,46 @@
 from __future__ import annotations
 
 import math
+import shutil
 import struct
 import subprocess
+from threading import Lock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from cortaflow.infrastructure.ffmpeg import find_executable, hidden_console_options
+
+
+_preview_cache_lock = Lock()
+_preview_cache_shutting_down = False
+
+
+def _remove_media_preview_cache() -> None:
+    cache = Path.cwd() / ".cortaflow-preview-cache"
+    try:
+        if cache.is_symlink() or cache.is_file():
+            cache.unlink(missing_ok=True)
+        elif cache.exists():
+            shutil.rmtree(cache)
+    except OSError:
+        # Cache files are disposable; a locked file should not prevent app startup.
+        pass
+
+
+def clear_media_preview_cache() -> None:
+    """Remove generated timeline thumbnails from the current workspace."""
+    global _preview_cache_shutting_down
+    with _preview_cache_lock:
+        _preview_cache_shutting_down = False
+        _remove_media_preview_cache()
+
+
+def stop_and_clear_media_preview_cache() -> None:
+    """Block new preview-cache writes and remove the cache during shutdown."""
+    global _preview_cache_shutting_down
+    with _preview_cache_lock:
+        _preview_cache_shutting_down = True
+        _remove_media_preview_cache()
 
 
 def build_media_preview_data(
@@ -35,12 +69,15 @@ def build_media_preview_data(
             ]
             subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False, **hidden_console_options())
             if output.is_file():
-                # Copy bytes into a stable cache file owned by the caller's temp lifetime.
                 stable = Path.cwd() / ".cortaflow-preview-cache"
-                stable.mkdir(parents=True, exist_ok=True)
                 destination = stable / f"{source.stem}-{index}-{duration_ms}.jpg"
-                destination.write_bytes(output.read_bytes())
-                thumbnails.append(str(destination))
+                with _preview_cache_lock:
+                    if not _preview_cache_shutting_down and not (cancelled and cancelled.is_set()):
+                        stable.mkdir(parents=True, exist_ok=True)
+                        destination.write_bytes(output.read_bytes())
+                        thumbnails.append(str(destination))
+        if cancelled and cancelled.is_set():
+            return {"thumbnails": [], "waveform": []}
         waveform = _extract_waveform(source, duration_ms)
         return {"thumbnails": thumbnails, "waveform": waveform}
 

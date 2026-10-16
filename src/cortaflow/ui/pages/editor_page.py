@@ -427,6 +427,7 @@ class EditorPage(QWidget):
         self.layer_overlay.unsetCursor()
 
     def _apply_dragged_crop(self, crop: CropFrame) -> None:
+        self.properties.tabs.setCurrentIndex(2)
         self.properties.set_manual_crop_origin(crop.x, crop.y)
         self.status_label.setText(
             "Enquadramento ajustado. O modo automático foi desativado para manter este corte na exportação."

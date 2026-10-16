@@ -14,11 +14,16 @@ from cortaflow.infrastructure.database import (
     recover_interrupted_tasks,
 )
 from cortaflow.infrastructure.certificates import configure_system_certificates
+from cortaflow.services.media_previews import (
+    clear_media_preview_cache,
+    stop_and_clear_media_preview_cache,
+)
 from cortaflow.ui.main_window import MainWindow
 
 
 def main() -> int:
     """Start the desktop application."""
+    clear_media_preview_cache()
     config = AppConfig()
     config.ensure_directories()
     configure_system_certificates(config.cache_dir / "certificates")
@@ -34,6 +39,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(config.app_name)
     app.setOrganizationName(config.organization)
+    app.aboutToQuit.connect(stop_and_clear_media_preview_cache)
     QThreadPool.globalInstance().setMaxThreadCount(max(1, min(8, task_limit)))
     window = MainWindow()
     if "--smoke-test" in sys.argv:
