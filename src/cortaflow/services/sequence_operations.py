@@ -53,7 +53,7 @@ def create_text_layer(
     end_ms: int | None = None,
 ) -> LayerItem:
     """Adiciona texto livre alinhado ao início da sequência."""
-    duration = end_ms or max(1000, sequence.duration_ms)
+    duration = end_ms if end_ms is not None else max(start_ms + 1000, sequence.duration_ms)
     layer = LayerItem(
         item_id=f"text-{uuid4().hex[:12]}",
         kind="text",
@@ -74,7 +74,7 @@ def create_image_layer(
     end_ms: int | None = None,
 ) -> LayerItem:
     """Adiciona uma imagem como overlay editável."""
-    duration = end_ms or max(1000, sequence.duration_ms)
+    duration = end_ms if end_ms is not None else max(start_ms + 1000, sequence.duration_ms)
     layer = LayerItem(
         item_id=f"image-{uuid4().hex[:12]}",
         kind="image",
@@ -98,7 +98,9 @@ def update_layer(sequence: SequenceDocument, item_id: str, **updates: object) ->
     found = False
     for item in sequence.layers:
         if item.item_id == item_id:
-            items.append(item.model_copy(update=updates))
+            values = item.model_dump()
+            values.update(updates)
+            items.append(LayerItem.model_validate(values))
             found = True
         else:
             items.append(item)

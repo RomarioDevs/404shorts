@@ -94,6 +94,10 @@ class EditorPage(QWidget):
         self.fps = 25.0
         self.source_width = 0
         self.source_height = 0
+        self.source_duration_ms = 0
+        self.timeline_position_ms = 0
+        self.active_video_clip_id: str | None = None
+        self.user_playback_rate = 1.0
         self.timeline_clips: list[TimelineClip] = []
         self.layers: list[LayerItem] = []
         self.sequence: SequenceDocument | None = None
@@ -300,8 +304,9 @@ class EditorPage(QWidget):
         timeline_header_layout.addWidget(self.timeline_mode_label)
         self.timeline = TimelineWidget()
         self.timeline.setObjectName("editorTimeline")
-        self.timeline.seek_requested.connect(self.player.setPosition)
+        self.timeline.seek_requested.connect(self._seek_timeline)
         self.timeline.clip_selected.connect(self._select_clip)
+        self.timeline.layer_selected.connect(self._select_layer)
         self.timeline.selection_changed.connect(self._selection_changed)
         self.timeline.clip_move_requested.connect(self.move_selected_clip)
         self.timeline.clip_trim_requested.connect(self.trim_selected_clip)
@@ -349,10 +354,8 @@ class EditorPage(QWidget):
         self.undo_button.setEnabled(False)
         self.redo_button.setEnabled(False)
 
-        self.player.durationChanged.connect(self.timeline.set_duration)
         self.player.durationChanged.connect(self._duration_changed)
         self.player.positionChanged.connect(self._position_changed)
-        self.player.positionChanged.connect(self.layer_overlay.set_position)
         self.player.playbackStateChanged.connect(self._playback_state_changed)
         self.player.errorOccurred.connect(self._playback_error)
         self.video.fullScreenChanged.connect(
@@ -399,6 +402,8 @@ class EditorPage(QWidget):
     def _properties_changed(self, settings: object) -> None:
         reframe, subtitle, audio, export = settings
         self.audio.setVolume(min(1.0, audio.volume / 2))
+        self.reframe_overlay.set_settings(reframe)
+        self._update_preview_format(reframe, export)
         self.settings_changed.emit((reframe, subtitle, audio, export))
 
     @staticmethod
@@ -451,6 +456,9 @@ class EditorPage(QWidget):
     ) -> None:
         self.source_path = path.resolve()
         self.resources.set_media(self.source_path)
+        self.source_duration_ms = 0
+        self.timeline_position_ms = 0
+        self.active_video_clip_id = None
         self.in_ms = 0
         self.out_ms = None
         self.fps = fps if fps and fps > 0 else 25.0
@@ -459,10 +467,6 @@ class EditorPage(QWidget):
         self.timeline.set_markers(self.in_ms, self.out_ms)
         self.reframe_overlay.set_source_size(width, height)
         self.status_label.setText(f"Mídia carregada · {self.fps:.3g} FPS")
-        if width and height:
-            self.preview_format_label.setText(f"{width}×{height} · {self.fps:.3g} FPS")
-        else:
-            self.preview_format_label.setText(f"Formato original · {self.fps:.3g} FPS")
         self.player.setSource(QUrl.fromLocalFile(str(self.source_path)))
 
     def set_selection(self, start_ms: int, end_ms: int) -> None:
@@ -471,7 +475,7 @@ class EditorPage(QWidget):
             raise ValueError("O fim do corte deve ser posterior ao início.")
         self.in_ms = max(0, start_ms)
         self.out_ms = end_ms
-        self.player.setPosition(self.in_ms)
+        self._seek_timeline(self.in_ms)
         self._update_markers()
 
     def set_reframe_data(
@@ -512,13 +516,15 @@ class EditorPage(QWidget):
         self._update_selection_label()
         self.layers = list(layers or [])
         self.sequence = sequence
+        self.selected_layer_id = None
         self.sequence_badge.setText("SEQUÊNCIA ATIVA" if sequence is not None else "RASCUNHO")
         self.reframe_keyframes = list(reframe_keyframes)
         cues = transcript.cues if transcript else []
         words = transcript.words if transcript else []
         self.layer_overlay.set_layers(self.layers)
-        self.layer_overlay.set_duration(max((item.timeline_end_ms for item in self.timeline_clips), default=1))
+        self.layer_overlay.set_position(self.timeline_position_ms)
         self.properties.set_selected_layer(None)
+        self.properties.tabs.setCurrentIndex(0)
         self.delete_layer_button.setEnabled(False)
         self.timeline.set_track_data(
             self.timeline_clips,
@@ -527,6 +533,7 @@ class EditorPage(QWidget):
             scenes=scenes,
             suggestions=suggestions,
             reframe=reframe_keyframes,
+            layers=self.layers,
         )
         self.timeline.select_clips(sorted(self.selected_clip_ids))
         self.properties.set_selected_clip(selected_clip)
@@ -536,11 +543,17 @@ class EditorPage(QWidget):
             audio_settings,
             export_settings,
         )
+        self.reframe_overlay.set_settings(reframe_settings)
+        self.preview_aspect.setCurrentText(reframe_settings.aspect_ratio)
+        self._update_preview_format(reframe_settings, export_settings)
+        self.timeline.select_layer(None)
+        self._sync_timeline_duration()
+        self._seek_timeline(min(self.timeline_position_ms, self.timeline.canvas.duration_ms))
         self.undo_stack.clear()
 
     def split_at_cursor(self) -> None:
         try:
-            updated = split_at(self.timeline_clips, self.player.position())
+            updated = split_at(self.timeline_clips, self.timeline_position_ms)
         except ValueError as exc:
             self.status_label.setText(str(exc))
             return
@@ -598,7 +611,7 @@ class EditorPage(QWidget):
             pasted = []
             for raw in raw_clips:
                 raw["clip_id"] = f"paste-{uuid4().hex[:12]}"
-                raw["timeline_start_ms"] = self.player.position() + int(raw["timeline_start_ms"])
+                raw["timeline_start_ms"] = self.timeline_position_ms + int(raw["timeline_start_ms"])
                 pasted.append(TimelineClip.model_validate(raw))
         except (ValueError, TypeError, KeyError, json.JSONDecodeError):
             self.status_label.setText("A área de transferência não contém clipes do CortaFlow.")
@@ -691,11 +704,16 @@ class EditorPage(QWidget):
         self.undo_stack.push(TimelineStateCommand(self, self.timeline_clips, updated, "Ajustar clipe"))
 
     def _select_clip(self, clip_id: str) -> None:
+        self.selected_layer_id = None
+        self.layer_overlay.select_layer(None)
+        self.timeline.select_layer(None)
+        self.delete_layer_button.setEnabled(False)
         self.selected_clip_id = clip_id if clip_id in self.selected_clip_ids else next(iter(self.selected_clip_ids), None)
         self.timeline.select_clips(sorted(self.selected_clip_ids))
         self.properties.set_selected_clip(
             next((clip for clip in self.timeline_clips if clip.clip_id == self.selected_clip_id), None)
         )
+        self.properties.tabs.setCurrentIndex(0)
         self._update_selection_label()
 
     def _selection_changed(self, clip_ids: object) -> None:
@@ -705,6 +723,12 @@ class EditorPage(QWidget):
         self.properties.set_selected_clip(
             next((clip for clip in self.timeline_clips if clip.clip_id == self.selected_clip_id), None)
         )
+        if self.selected_clip_id:
+            self.selected_layer_id = None
+            self.layer_overlay.select_layer(None)
+            self.timeline.select_layer(None)
+            self.properties.set_selected_layer(None)
+            self.properties.tabs.setCurrentIndex(0)
         self._update_selection_label()
 
     def _update_selection_label(self) -> None:
@@ -728,6 +752,7 @@ class EditorPage(QWidget):
         self.timeline.canvas.track_items["video"] = [item for item in clips if item.track == "video"]
         self.timeline.canvas.track_items["audio"] = [item for item in clips if item.track == "audio"]
         self.timeline.select_clips(sorted(self.selected_clip_ids))
+        self._sync_timeline_duration()
         self.timeline.canvas.update()
         self._update_selection_label()
         if self.selected_clip_id:
@@ -738,16 +763,21 @@ class EditorPage(QWidget):
             self.sequence = self.sequence.model_copy(update={"clips": list(clips), "dirty": True})
             self.sequence_changed.emit(self.sequence)
         self.timeline_changed.emit(list(clips))
+        self._seek_timeline(self.timeline_position_ms)
 
     def _apply_layers(self, layers: list[LayerItem]) -> None:
         self.layers = list(layers)
         self.layer_overlay.set_layers(self.layers)
+        self.timeline.canvas.track_items["layers"] = list(self.layers)
+        self._sync_timeline_duration()
+        self.timeline.select_layer(self.selected_layer_id)
         selected = next((layer for layer in self.layers if layer.item_id == self.selected_layer_id), None)
         self.properties.set_selected_layer(selected)
         if self.sequence is not None:
             self.sequence = self.sequence.model_copy(update={"layers": list(layers), "dirty": True})
             self.sequence_changed.emit(self.sequence)
         self.layers_changed.emit(list(layers))
+        self.layer_overlay.set_position(self.timeline_position_ms)
 
     def add_text_layer(self) -> None:
         text, accepted = QInputDialog.getText(self, "Adicionar texto", "Texto da camada:")
@@ -756,7 +786,7 @@ class EditorPage(QWidget):
         sequence = self.sequence or SequenceDocument(
             sequence_id="editor-draft", name="Rascunho", clips=list(self.timeline_clips)
         )
-        layer = create_text_layer(sequence, text, start_ms=self.player.position())
+        layer = create_text_layer(sequence, text, start_ms=self._layer_start_position())
         self.sequence = sequence
         self.sequence_badge.setText("SEQUÊNCIA ATIVA")
         self.selected_layer_id = layer.item_id
@@ -772,17 +802,38 @@ class EditorPage(QWidget):
         sequence = self.sequence or SequenceDocument(
             sequence_id="editor-draft", name="Rascunho", clips=list(self.timeline_clips)
         )
-        layer = create_image_layer(sequence, path, start_ms=self.player.position())
+        layer = create_image_layer(sequence, path, start_ms=self._layer_start_position())
         self.sequence = sequence
         self.selected_layer_id = layer.item_id
         self._apply_layers(sequence.layers)
         self._select_layer(layer.item_id)
 
-    def _select_layer(self, item_id: str) -> None:
+    def _select_layer(self, item_id: str | None) -> None:
         self.selected_layer_id = item_id
         self.delete_layer_button.setEnabled(bool(item_id))
         self.layer_overlay.select_layer(item_id)
-        self.properties.set_selected_layer(next((layer for layer in self.layers if layer.item_id == item_id), None))
+        self.timeline.select_layer(item_id)
+        self.properties.set_selected_layer(
+            next((layer for layer in self.layers if layer.item_id == item_id), None)
+        )
+        self.properties.tabs.setCurrentIndex(1 if item_id else 0)
+
+    def _layer_start_position(self) -> int:
+        clips = self._video_clips()
+        current = next(
+            (clip for clip in clips if clip.timeline_start_ms <= self.timeline_position_ms < clip.timeline_end_ms),
+            None,
+        )
+        if current is not None:
+            return self.timeline_position_ms
+        previous = next(
+            (clip for clip in reversed(clips) if clip.timeline_end_ms <= self.timeline_position_ms),
+            None,
+        )
+        if previous is not None:
+            return max(previous.timeline_start_ms, previous.timeline_end_ms - min(1000, previous.duration_ms))
+        next_clip = next((clip for clip in clips if clip.timeline_start_ms > self.timeline_position_ms), None)
+        return next_clip.timeline_start_ms if next_clip else 0
 
     def delete_selected_layer(self) -> None:
         if not self.selected_layer_id:
@@ -825,7 +876,7 @@ class EditorPage(QWidget):
         layer = next((item for item in self.layers if item.item_id == self.selected_layer_id), None)
         if layer is None:
             return
-        timestamp = self.player.position()
+        timestamp = self.timeline_position_ms
         keyframe = TransformKeyframe(
             timestamp_ms=timestamp,
             x_percent=self.properties.layer_x.value(),
@@ -874,10 +925,101 @@ class EditorPage(QWidget):
     def frame_duration_ms(self) -> int:
         return max(1, round(1000 / self.fps))
 
+    def _video_clips(self) -> list[TimelineClip]:
+        return sorted(
+            (clip for clip in self.timeline_clips if clip.track == "video"),
+            key=lambda clip: (clip.timeline_start_ms, clip.clip_id),
+        )
+
+    def _sync_timeline_duration(self) -> None:
+        clips_end = max(
+            (clip.timeline_end_ms for clip in self.timeline_clips), default=0
+        )
+        layers_end = max((layer.timeline_end_ms for layer in self.layers), default=0)
+        duration = max(clips_end, layers_end, self.source_duration_ms if not clips_end else 0)
+        self.timeline.set_duration(max(0, duration))
+        self.layer_overlay.set_duration(max(1, duration))
+        self.time_label.setText(
+            f"{format_timestamp(self.timeline_position_ms)} / {format_timestamp(duration)}"
+        )
+
+    def _update_preview_format(self, reframe, export) -> None:
+        short_edge, long_edge = sorted((export.width, export.height))
+        dimensions = {
+            "9:16": (short_edge, long_edge),
+            "16:9": (long_edge, short_edge),
+            "1:1": (short_edge, short_edge),
+            "4:5": (short_edge, round(short_edge * 5 / 4)),
+            "original": (self.source_width, self.source_height),
+        }
+        width, height = dimensions[reframe.aspect_ratio]
+        if width > 0 and height > 0:
+            self.preview_format_label.setText(f"{width}×{height} · {export.fps:g} FPS")
+        else:
+            self.preview_format_label.setText(f"Formato {reframe.aspect_ratio} · {export.fps:g} FPS")
+
+    def _seek_timeline(self, position_ms: int, resume: bool | None = None) -> None:
+        was_playing = self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+        keep_playing = was_playing if resume is None else resume
+        clips = self._video_clips()
+        if not clips:
+            self.player.pause()
+            self.active_video_clip_id = None
+            self.timeline_position_ms = 0
+            self.timeline.set_position(0)
+            self.layer_overlay.set_position(0)
+            self.time_label.setText(f"00:00:00 / {format_timestamp(self.timeline.canvas.duration_ms)}")
+            return
+
+        duration = max(clip.timeline_end_ms for clip in clips)
+        target = max(0, min(position_ms, duration))
+        clip = next(
+            (item for item in clips if item.timeline_start_ms <= target < item.timeline_end_ms),
+            None,
+        )
+        at_end = False
+        if clip is None:
+            clip = next((item for item in clips if item.timeline_start_ms > target), None)
+            if clip is not None:
+                target = clip.timeline_start_ms
+            else:
+                clip = next((item for item in reversed(clips) if item.timeline_end_ms <= target), None)
+                if clip is None:
+                    clip = clips[0]
+                    target = clip.timeline_start_ms
+                else:
+                    target = clip.timeline_end_ms
+                    at_end = True
+
+        source_position = clip.source_end_ms - 1 if at_end else (
+            clip.source_start_ms + round((target - clip.timeline_start_ms) * clip.speed)
+        )
+        source_position = max(clip.source_start_ms, min(source_position, clip.source_end_ms - 1))
+        self.active_video_clip_id = clip.clip_id
+        self.timeline_position_ms = target
+        self.timeline.set_position(target)
+        self.layer_overlay.set_position(target)
+        self.reframe_overlay.set_timestamp(source_position)
+        self.time_label.setText(
+            f"{format_timestamp(target)} / {format_timestamp(self.timeline.canvas.duration_ms)}"
+        )
+        self.player.setPlaybackRate(self.user_playback_rate * clip.speed)
+        self.player.setPosition(source_position)
+        if keep_playing and not at_end:
+            self.player.play()
+
     def toggle_playback(self) -> None:
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
         else:
+            clips = self._video_clips()
+            if not clips:
+                return
+            target = self.timeline_position_ms
+            if not any(item.timeline_start_ms <= target < item.timeline_end_ms for item in clips):
+                next_clip = next((item for item in clips if item.timeline_start_ms > target), None)
+                target = next_clip.timeline_start_ms if next_clip else clips[0].timeline_start_ms
+            self._seek_timeline(target, resume=False)
             self.player.play()
 
     def toggle_fullscreen(self) -> None:
@@ -892,21 +1034,54 @@ class EditorPage(QWidget):
         self._jump(self.frame_duration_ms)
 
     def _jump(self, delta_ms: int) -> None:
-        end = self.player.duration() if self.player.duration() > 0 else 2_147_483_647
-        self.player.setPosition(min(end, max(0, self.player.position() + delta_ms)))
+        self._seek_timeline(self.timeline_position_ms + delta_ms)
 
     def _set_playback_rate(self, index: int) -> None:
         value = self.rate.itemData(index)
         if value is not None:
-            self.player.setPlaybackRate(float(value))
+            self.user_playback_rate = float(value)
+            clip = next((item for item in self._video_clips() if item.clip_id == self.active_video_clip_id), None)
+            self.player.setPlaybackRate(self.user_playback_rate * (clip.speed if clip else 1.0))
 
-    def _position_changed(self, position: int) -> None:
-        self.timeline.set_position(position)
-        self.reframe_overlay.set_timestamp(position)
-        self.time_label.setText(f"{format_timestamp(position)} / {format_timestamp(self.player.duration())}")
+    def _position_changed(self, source_position: int) -> None:
+        clip = next(
+            (item for item in self._video_clips() if item.clip_id == self.active_video_clip_id),
+            None,
+        )
+        if clip is None:
+            timeline_position = min(source_position, self.timeline.canvas.duration_ms)
+        elif source_position >= clip.source_end_ms - max(2, min(15, self.frame_duration_ms // 4)):
+            next_clip = next(
+                (item for item in self._video_clips() if item.timeline_start_ms >= clip.timeline_end_ms),
+                None,
+            )
+            if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState and next_clip:
+                self._seek_timeline(next_clip.timeline_start_ms, resume=True)
+                return
+            if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                self.player.pause()
+            timeline_position = clip.timeline_end_ms
+        else:
+            source_offset = max(0, source_position - clip.source_start_ms)
+            timeline_position = clip.timeline_start_ms + round(source_offset / clip.speed)
+        self.timeline_position_ms = max(0, min(timeline_position, self.timeline.canvas.duration_ms))
+        self.timeline.set_position(self.timeline_position_ms)
+        self.layer_overlay.set_position(self.timeline_position_ms)
+        self.reframe_overlay.set_timestamp(source_position)
+        self.time_label.setText(
+            f"{format_timestamp(self.timeline_position_ms)} / {format_timestamp(self.timeline.canvas.duration_ms)}"
+        )
 
     def _duration_changed(self, duration: int) -> None:
-        self.time_label.setText(f"{format_timestamp(self.player.position())} / {format_timestamp(duration)}")
+        self.source_duration_ms = duration
+        self._sync_timeline_duration()
+        if self._video_clips():
+            self._seek_timeline(
+                self.timeline_position_ms,
+                resume=self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState,
+            )
+        else:
+            self._position_changed(self.player.position())
         if self.source_path and duration > 0 and self.preview_worker is None:
             worker = FunctionWorker(build_media_preview_data, self.source_path, duration)
             worker.signals.finished.connect(self._media_preview_finished)
@@ -931,18 +1106,18 @@ class EditorPage(QWidget):
             self.status_label.setText(f"Não foi possível reproduzir a mídia: {message}")
 
     def mark_in(self) -> None:
-        self.in_ms = self.player.position()
+        self.in_ms = self.timeline_position_ms
         self._update_markers()
 
     def mark_out(self) -> None:
-        self.out_ms = self.player.position()
+        self.out_ms = self.timeline_position_ms
         self._update_markers()
 
     def _update_markers(self) -> None:
         self.timeline.set_markers(self.in_ms, self.out_ms)
 
     def export_selection(self) -> None:
-        if self.sequence is not None and any(item.track == "video" for item in self.timeline_clips):
+        if any(item.track == "video" for item in self.timeline_clips):
             self.sequence_export_requested.emit()
             return
         if self.export_worker is not None:

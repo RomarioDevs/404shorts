@@ -4,8 +4,10 @@ from PySide6.QtCore import QLineF, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from cortaflow.domain.editing import ReframeSettings
 from cortaflow.domain.project import ReframeKeyframe, resolve_reframe_at
 from cortaflow.domain.tracking import CropFrame, FaceTrackPoint, SpeakerKeyframe
+from cortaflow.services.auto_reframe import apply_reframe_settings
 
 
 class ReframeOverlay(QWidget):
@@ -20,10 +22,19 @@ class ReframeOverlay(QWidget):
         self.selected_track_id: int | None = None
         self.speaker_keyframes: list[SpeakerKeyframe] = []
         self.timestamp_ms = 0
+        self.settings = ReframeSettings()
+        self.effective_keyframes: list[ReframeKeyframe] = []
+        self._refresh_keyframes()
+
+    def set_settings(self, settings: ReframeSettings) -> None:
+        self.settings = settings
+        self._refresh_keyframes()
+        self.update()
 
     def set_source_size(self, width: int | None, height: int | None) -> None:
         self.source_width = max(0, width or 0)
         self.source_height = max(0, height or 0)
+        self._refresh_keyframes()
         self.update()
 
     def set_data(
@@ -37,7 +48,16 @@ class ReframeOverlay(QWidget):
         self.keyframes = list(keyframes)
         self.selected_track_id = selected_track_id
         self.speaker_keyframes = list(speaker_keyframes or [])
+        self._refresh_keyframes()
         self.update()
+
+    def _refresh_keyframes(self) -> None:
+        if self.source_width and self.source_height:
+            self.effective_keyframes = apply_reframe_settings(
+                self.keyframes, self.settings, self.source_width, self.source_height
+            )
+        else:
+            self.effective_keyframes = list(self.keyframes)
 
     def set_timestamp(self, timestamp_ms: int) -> None:
         self.timestamp_ms = max(0, timestamp_ms)
@@ -49,14 +69,27 @@ class ReframeOverlay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         video_rect = self._video_rect()
-        crop = resolve_reframe_at(self.keyframes, self.timestamp_ms)
+        crop = resolve_reframe_at(self.effective_keyframes, self.timestamp_ms)
         if crop is None:
-            crop_width = round(self.source_height * 9 / 16)
+            ratios = {
+                "9:16": (9, 16),
+                "16:9": (16, 9),
+                "1:1": (1, 1),
+                "4:5": (4, 5),
+                "original": (self.source_width, self.source_height),
+            }
+            ratio_width, ratio_height = ratios[self.settings.aspect_ratio]
+            ratio = ratio_width / ratio_height
+            crop_width, crop_height = self.source_width, self.source_height
+            if crop_width / crop_height > ratio:
+                crop_width = round(crop_height * ratio)
+            else:
+                crop_height = round(crop_width / ratio)
             crop = CropFrame(
-                x=max(0, (self.source_width - crop_width) // 2),
-                y=0,
-                width=min(self.source_width, crop_width),
-                height=self.source_height,
+                x=max(0, min(self.source_width - crop_width, round((self.source_width - crop_width) / 2 + self.settings.x))),
+                y=max(0, min(self.source_height - crop_height, round((self.source_height - crop_height) / 2 + self.settings.y))),
+                width=crop_width,
+                height=crop_height,
             )
         crop_rect = self._source_rect(crop.x, crop.y, crop.width, crop.height, video_rect)
         shade = QColor(0, 0, 0, 135)
