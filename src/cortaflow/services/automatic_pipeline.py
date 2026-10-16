@@ -129,7 +129,10 @@ def create_automatic_cuts(
             progress=progress,
             cancelled=cancelled,
         )
-        if _has_multiple_visible_faces(face_tracks):
+        # A entrevista pode alternar entre câmeras: nesse caso nunca há dois
+        # rostos no mesmo quadro, mas ainda existem vários participantes ao
+        # longo do vídeo. A análise de falante precisa rodar nos dois casos.
+        if _has_multiple_visible_faces(face_tracks) or _has_multiple_tracked_faces(face_tracks):
             _update(
                 progress,
                 "speaker",
@@ -359,6 +362,11 @@ def _has_multiple_visible_faces(tracks: list[FaceTrackPoint]) -> bool:
     for point in tracks:
         visible_by_timestamp.setdefault(point.timestamp_ms, set()).add(point.track_id)
     return any(len(track_ids) > 1 for track_ids in visible_by_timestamp.values())
+
+
+def _has_multiple_tracked_faces(tracks: list[FaceTrackPoint]) -> bool:
+    """Return whether more than one temporary face ID appears in the recording."""
+    return len({point.track_id for point in tracks}) > 1
 
 
 def _unavailable_framing_validation() -> FramingValidation:

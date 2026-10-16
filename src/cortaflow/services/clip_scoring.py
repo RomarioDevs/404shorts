@@ -460,6 +460,7 @@ def _score_candidate(
     emotion = min(1.0, _keyword_score(excerpt, _EMOTION_TERMS) + 0.25 * excerpt.count("!"))
     energy = energy_index.score(start_word.start_ms, end_word.end_ms)
     face = face_index.continuity(start_word.start_ms, end_word.end_ms)
+    face_switches = face_index.switches(start_word.start_ms, end_word.end_ms)
     resegmented = belongs_to_oversized_discourse(
         words,
         start_index,
@@ -482,6 +483,7 @@ def _score_candidate(
         "energia": energy,
         "cena": scene_alignment,
         "rosto": face,
+        "estabilidade_rosto": max(0.0, 1.0 - min(1.0, face_switches / 3)),
         "qualidade_audiovisual": round(0.55 * face + 0.45 * energy, 3),
         "subideia_resolvida": float(resegmented),
         "tópico": topic_focus,
@@ -501,6 +503,7 @@ def _score_candidate(
         "energia": 0.03,
         "cena": 0.02,
         "rosto": 0.03,
+        "estabilidade_rosto": 0.03,
         "tópico": 0.06,
         "mudança_tema": 0.04,
     }
@@ -516,6 +519,8 @@ def _score_candidate(
         reasons.append("alinhado a mudança de cena")
     if face >= 0.65:
         reasons.append("rosto contínuo")
+    if face_switches:
+        reasons.append(f"{face_switches} troca(s) de rosto; revisar enquadramento")
     if resegmented:
         reasons.append("subideia extraída de discussão acima de 179 s")
     if topic_alignment or topic_focus > 0.5:
@@ -663,6 +668,23 @@ class _FaceIndex:
             else 0
         )
         return min(1.0, 0.7 * dominant_share + 0.3 * covered)
+
+    def switches(self, start_ms: int, end_ms: int) -> int:
+        """Count focus changes in chronological samples for editorial review."""
+        left = bisect_left(self.timestamps, start_ms)
+        right = bisect_right(self.timestamps, end_ms)
+        relevant = self.points[left:right]
+        by_timestamp: dict[int, set[int]] = {}
+        for point in relevant:
+            by_timestamp.setdefault(point.timestamp_ms, set()).add(point.track_id)
+        previous: int | None = None
+        changes = 0
+        for timestamp in sorted(by_timestamp):
+            current = min(by_timestamp[timestamp])
+            if previous is not None and current != previous:
+                changes += 1
+            previous = current
+        return changes
 
 
 def _ends_sentence(text: str) -> bool:

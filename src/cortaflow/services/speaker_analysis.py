@@ -67,7 +67,7 @@ def analyze_active_speaker(
             if scene_boundaries[boundary_index] > previous_timestamp:
                 detector.reset()
             boundary_index += 1
-        sample = min(evidence, key=lambda item: abs(item.timestamp_ms - timestamp))
+        sample = _closest_audio_evidence(evidence, timestamp)
         decision = detector.update(timestamp, grouped[timestamp], sample.voice_active, sample.energy)
         decisions.append(
             SpeakerKeyframe(
@@ -96,6 +96,19 @@ def analyze_active_speaker(
         scene_boundaries_ms=scene_boundaries,
     )
     return decisions, crops
+
+
+def _closest_audio_evidence(evidence: list[AudioEvidence], timestamp_ms: int) -> AudioEvidence:
+    """Use nearby audio evidence, avoiding stale samples after A/V drift.
+
+    Audio is bucketed at roughly 200 ms. If a face sample falls far outside
+    the available audio range, treating it as silence is safer than assigning
+    speech from another part of the recording to the wrong face.
+    """
+    closest = min(evidence, key=lambda item: abs(item.timestamp_ms - timestamp_ms))
+    if abs(closest.timestamp_ms - timestamp_ms) <= 450:
+        return closest
+    return AudioEvidence(timestamp_ms=timestamp_ms, energy=0, voice_active=False)
 
 
 def apply_speaker_overrides(
