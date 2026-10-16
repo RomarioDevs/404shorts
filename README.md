@@ -75,7 +75,7 @@ Os modelos Faster-Whisper são baixados apenas após confirmação explícita na
 
 1. **Importar:** adicione o vídeo ou analise uma URL autorizada.
 2. **Legendas:** escolha o idioma/modelo, transcreva e corrija o texto. As legendas podem ser exportadas nos formatos disponíveis pela página.
-3. **Analisar:** detecte cenas, silêncios, rostos e falante ativo. O falante é uma estimativa; corrija manualmente se necessário.
+3. **Analisar:** detecte cenas, silêncios, rostos e falante ativo. Use **Abrir diagnóstico visual** para reproduzir o vídeo com caixas dos rostos, IDs, confiança, falante provável e área segura 9:16. O falante é uma estimativa; corrija manualmente se necessário.
 4. **Cortes sugeridos:** assista, aceite/rejeite e escolha os intervalos que deseja editar ou exportar.
 5. **Editor completo:** ajuste a linha do tempo, o enquadramento/keyframes e outros elementos quando necessário.
 6. **Cortes sugeridos:** revise a prévia atualizada e salve um corte ou os aceitos em lote.
