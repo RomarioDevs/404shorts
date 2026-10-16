@@ -485,6 +485,9 @@ class MainWindow(QMainWindow):
 
     def _save_cuts_for_current_context(self) -> None:
         """Save the open individual cut; use acceptance only for a results batch."""
+        if self.navigation.currentRow() == 3:
+            self._export_editor_sequence()
+            return
         if (
             self.navigation.currentRow() == 2
             and self.suggestions_page.workspace_tabs.currentIndex() == 1
