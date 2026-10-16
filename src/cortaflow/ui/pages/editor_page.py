@@ -26,7 +26,14 @@ from cortaflow.domain.clip import ClipRange, format_timestamp
 from cortaflow.domain.editing import LayerItem, SequenceDocument, TimelineClip
 from cortaflow.domain.project import ReframeKeyframe
 from cortaflow.domain.tracking import CropFrame
-from cortaflow.services.editor_operations import delete_clip, move_clip, set_transition, split_at, trim_clip
+from cortaflow.services.editor_operations import (
+    move_clip,
+    ripple_delete,
+    set_transition,
+    snap_position,
+    split_at,
+    trim_clip,
+)
 from cortaflow.services.sequence_operations import create_image_layer, create_text_layer, update_layer
 from cortaflow.services.transcoder import export_clip
 from cortaflow.ui.widgets.timeline import TimelineWidget
@@ -85,6 +92,7 @@ class EditorPage(QWidget):
         self.layers: list[LayerItem] = []
         self.sequence: SequenceDocument | None = None
         self.selected_clip_id: str | None = None
+        self.selected_clip_ids: set[str] = set()
         self.selected_layer_id: str | None = None
         self.reframe_keyframes: list[ReframeKeyframe] = []
         self.undo_stack = QUndoStack(self)
@@ -242,6 +250,7 @@ class EditorPage(QWidget):
         self.timeline.setObjectName("editorTimeline")
         self.timeline.seek_requested.connect(self.player.setPosition)
         self.timeline.clip_selected.connect(self._select_clip)
+        self.timeline.selection_changed.connect(self._selection_changed)
         self.timeline.clip_move_requested.connect(self.move_selected_clip)
         self.timeline.clip_trim_requested.connect(self.trim_selected_clip)
         layout.addWidget(self.timeline)
@@ -417,6 +426,8 @@ class EditorPage(QWidget):
         sequence=None,
     ) -> None:
         self.timeline_clips = list(timeline_clips)
+        self.selected_clip_id = None
+        self.selected_clip_ids.clear()
         self.layers = list(layers or [])
         self.sequence = sequence
         self.sequence_badge.setText("SEQUÊNCIA ATIVA" if sequence is not None else "RASCUNHO")
@@ -452,19 +463,34 @@ class EditorPage(QWidget):
         self.undo_stack.push(TimelineStateCommand(self, self.timeline_clips, updated, "Dividir clipe"))
 
     def delete_selected_clip(self) -> None:
-        if not self.selected_clip_id:
+        clip_ids = set(self.selected_clip_ids)
+        if not clip_ids and self.selected_clip_id:
+            clip_ids.add(self.selected_clip_id)
+        if not clip_ids:
             return
+        linked_ranges = {
+            (clip.timeline_start_ms, clip.timeline_end_ms)
+            for clip in self.timeline_clips
+            if clip.clip_id in clip_ids
+        }
+        clip_ids.update(
+            clip.clip_id
+            for clip in self.timeline_clips
+            if (clip.timeline_start_ms, clip.timeline_end_ms) in linked_ranges
+        )
         try:
-            updated = delete_clip(self.timeline_clips, self.selected_clip_id)
+            updated = ripple_delete(self.timeline_clips, clip_ids)
         except ValueError as exc:
             self.status_label.setText(str(exc))
             return
-        self.undo_stack.push(TimelineStateCommand(self, self.timeline_clips, updated, "Excluir clipe"))
+        self.undo_stack.push(TimelineStateCommand(self, self.timeline_clips, updated, "Excluir com ripple"))
         self.selected_clip_id = None
+        self.selected_clip_ids.clear()
         self.properties.set_selected_clip(None)
 
     def move_selected_clip(self, clip_id: str, timeline_start_ms: int) -> None:
         try:
+            timeline_start_ms = snap_position(self.timeline_clips, clip_id, timeline_start_ms)
             updated = move_clip(self.timeline_clips, clip_id, timeline_start_ms)
         except ValueError as exc:
             self.status_label.setText(str(exc))
@@ -517,17 +543,29 @@ class EditorPage(QWidget):
         self.undo_stack.push(TimelineStateCommand(self, self.timeline_clips, updated, "Ajustar clipe"))
 
     def _select_clip(self, clip_id: str) -> None:
-        self.selected_clip_id = clip_id
-        self.timeline.select_clip(clip_id)
+        self.selected_clip_id = clip_id if clip_id in self.selected_clip_ids else next(iter(self.selected_clip_ids), None)
+        self.timeline.select_clips(sorted(self.selected_clip_ids))
         self.properties.set_selected_clip(
-            next((clip for clip in self.timeline_clips if clip.clip_id == clip_id), None)
+            next((clip for clip in self.timeline_clips if clip.clip_id == self.selected_clip_id), None)
+        )
+
+    def _selection_changed(self, clip_ids: object) -> None:
+        self.selected_clip_ids = {str(item) for item in clip_ids}
+        if self.selected_clip_id not in self.selected_clip_ids:
+            self.selected_clip_id = next(iter(self.selected_clip_ids), None)
+        self.properties.set_selected_clip(
+            next((clip for clip in self.timeline_clips if clip.clip_id == self.selected_clip_id), None)
         )
 
     def _apply_timeline_clips(self, clips: list[TimelineClip]) -> None:
         self.timeline_clips = list(clips)
+        self.selected_clip_ids.intersection_update(item.clip_id for item in clips)
+        if self.selected_clip_id not in self.selected_clip_ids:
+            self.selected_clip_id = next(iter(self.selected_clip_ids), None)
         self.timeline.canvas.clips = list(clips)
         self.timeline.canvas.track_items["video"] = [item for item in clips if item.track == "video"]
         self.timeline.canvas.track_items["audio"] = [item for item in clips if item.track == "audio"]
+        self.timeline.select_clips(sorted(self.selected_clip_ids))
         self.timeline.canvas.update()
         if self.selected_clip_id:
             self.properties.set_selected_clip(

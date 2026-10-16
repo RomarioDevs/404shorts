@@ -63,6 +63,50 @@ def delete_clip(clips: list[TimelineClip], clip_id: str) -> list[TimelineClip]:
     return result
 
 
+def snap_position(
+    clips: list[TimelineClip],
+    clip_id: str,
+    timeline_start_ms: int,
+    threshold_ms: int = 120,
+) -> int:
+    """Snap a dragged clip to nearby clip edges, like a magnetic timeline."""
+    target = next((clip for clip in clips if clip.clip_id == clip_id), None)
+    if target is None:
+        raise ValueError("Clipe não encontrado.")
+    proposed_end = timeline_start_ms + target.duration_ms
+    candidates = {0}
+    for clip in clips:
+        if clip.clip_id != clip_id:
+            candidates.update((clip.timeline_start_ms, clip.timeline_end_ms))
+    anchors = (timeline_start_ms, proposed_end)
+    best: tuple[int, int] | None = None
+    for edge in anchors:
+        for candidate in candidates:
+            distance = abs(edge - candidate)
+            if distance > threshold_ms:
+                continue
+            snapped = candidate if edge == timeline_start_ms else candidate - target.duration_ms
+            choice = (distance, max(0, snapped))
+            if best is None or choice < best:
+                best = choice
+    return best[1] if best is not None else max(0, timeline_start_ms)
+
+
+def ripple_delete(clips: list[TimelineClip], clip_ids: set[str]) -> list[TimelineClip]:
+    """Delete selected clips and close the resulting gaps across all tracks."""
+    selected = [clip for clip in clips if clip.clip_id in clip_ids]
+    if not selected:
+        raise ValueError("Selecione pelo menos um clipe válido para excluir.")
+    intervals = sorted({(clip.timeline_start_ms, clip.timeline_end_ms) for clip in selected})
+    result: list[TimelineClip] = []
+    for clip in clips:
+        if clip.clip_id in clip_ids:
+            continue
+        shift = sum(end - start for start, end in intervals if end <= clip.timeline_start_ms)
+        result.append(_updated(clip, timeline_start_ms=max(0, clip.timeline_start_ms - shift)))
+    return result
+
+
 def move_clip(clips: list[TimelineClip], clip_id: str, timeline_start_ms: int) -> list[TimelineClip]:
     if timeline_start_ms < 0:
         raise ValueError("A posição do clipe não pode ser negativa.")
