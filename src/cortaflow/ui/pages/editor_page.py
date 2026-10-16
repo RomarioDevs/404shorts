@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QStackedLayout,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -146,6 +147,35 @@ class EditorPage(QWidget):
         self.redo_button.setToolTip("Refazer (Ctrl+Shift+Z)")
         header_layout.addWidget(self.redo_button)
         layout.addWidget(header)
+
+        # Contextual action strip: the main editor should expose the common
+        # operations without forcing the user to hunt through the inspector.
+        action_strip = QFrame()
+        action_strip.setObjectName("editorActionStrip")
+        action_layout = QHBoxLayout(action_strip)
+        action_layout.setContentsMargins(8, 6, 8, 6)
+        action_layout.setSpacing(5)
+        action_layout.addWidget(QLabel("ADICIONAR"))
+        self.quick_media_button = self._quick_action("Mídia", self.media_import_requested)
+        self.quick_text_button = self._quick_action("Texto", self.add_text_layer)
+        self.quick_image_button = self._quick_action("Imagem", self.add_image_layer)
+        self.quick_split_button = self._quick_action("Dividir", self.split_at_cursor)
+        self.quick_delete_button = self._quick_action("Excluir", self.delete_selected_clip)
+        for button in (self.quick_media_button, self.quick_text_button, self.quick_image_button,
+                       self.quick_split_button, self.quick_delete_button):
+            action_layout.addWidget(button)
+        action_layout.addSpacing(8)
+        self.selection_label = QLabel("Nenhuma seleção")
+        self.selection_label.setObjectName("editorSelectionLabel")
+        action_layout.addWidget(self.selection_label)
+        action_layout.addStretch(1)
+        self.snap_button = QToolButton()
+        self.snap_button.setText("↔ Encaixe")
+        self.snap_button.setCheckable(True)
+        self.snap_button.setChecked(True)
+        self.snap_button.setToolTip("Atrair clipes para cortes e marcadores próximos")
+        action_layout.addWidget(self.snap_button)
+        layout.addWidget(action_strip)
 
         self.video_container = QWidget()
         self.video_container.setObjectName("previewSurface")
@@ -354,6 +384,16 @@ class EditorPage(QWidget):
         button.clicked.connect(handler)
         return button
 
+    @staticmethod
+    def _quick_action(text: str, handler: object) -> QToolButton:
+        button = QToolButton()
+        button.setText(text)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(handler)
+        button.setObjectName("editorQuickAction")
+        return button
+
     def _create_shortcuts(self) -> None:
         bindings = (
             ("Space", self.toggle_playback),
@@ -445,6 +485,7 @@ class EditorPage(QWidget):
         self.timeline_clips = list(timeline_clips)
         self.selected_clip_id = None
         self.selected_clip_ids.clear()
+        self._update_selection_label()
         self.layers = list(layers or [])
         self.sequence = sequence
         self.sequence_badge.setText("SEQUÊNCIA ATIVA" if sequence is not None else "RASCUNHO")
@@ -629,6 +670,7 @@ class EditorPage(QWidget):
         self.properties.set_selected_clip(
             next((clip for clip in self.timeline_clips if clip.clip_id == self.selected_clip_id), None)
         )
+        self._update_selection_label()
 
     def _selection_changed(self, clip_ids: object) -> None:
         self.selected_clip_ids = {str(item) for item in clip_ids}
@@ -637,6 +679,19 @@ class EditorPage(QWidget):
         self.properties.set_selected_clip(
             next((clip for clip in self.timeline_clips if clip.clip_id == self.selected_clip_id), None)
         )
+        self._update_selection_label()
+
+    def _update_selection_label(self) -> None:
+        count = len(self.selected_clip_ids)
+        if not count:
+            self.selection_label.setText("Nenhuma seleção")
+            return
+        duration = sum(
+            max(0, clip.timeline_end_ms - clip.timeline_start_ms)
+            for clip in self.timeline_clips
+            if clip.clip_id in self.selected_clip_ids
+        )
+        self.selection_label.setText(f"{count} clipe(s) selecionado(s) · {format_timestamp(duration)}")
 
     def _apply_timeline_clips(self, clips: list[TimelineClip]) -> None:
         self.timeline_clips = list(clips)
@@ -648,6 +703,7 @@ class EditorPage(QWidget):
         self.timeline.canvas.track_items["audio"] = [item for item in clips if item.track == "audio"]
         self.timeline.select_clips(sorted(self.selected_clip_ids))
         self.timeline.canvas.update()
+        self._update_selection_label()
         if self.selected_clip_id:
             self.properties.set_selected_clip(
                 next((clip for clip in clips if clip.clip_id == self.selected_clip_id), None)
