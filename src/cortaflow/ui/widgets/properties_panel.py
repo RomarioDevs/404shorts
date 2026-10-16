@@ -23,6 +23,7 @@ class PropertiesPanel(QWidget):
     settings_changed = Signal(object)
     clip_update_requested = Signal(object)
     manual_keyframe_requested = Signal()
+    layer_keyframe_requested = Signal()
     layer_update_requested = Signal(object)
 
     def __init__(self) -> None:
@@ -57,6 +58,12 @@ class PropertiesPanel(QWidget):
         self.clip_source_start = self._spin(0, 86_400_000)
         self.clip_source_end = self._spin(1, 86_400_000)
         self.clip_transition = self._spin(0, 5000)
+        self.clip_speed = self._double(0.25, 4, 0.05)
+        self.clip_fade_in = self._spin(0, 5000)
+        self.clip_fade_out = self._spin(0, 5000)
+        self.clip_effect = QComboBox()
+        for label, value in (("Sem efeito", "none"), ("Desfoque", "blur"), ("Preto e branco", "grayscale"), ("Vintage", "vintage")):
+            self.clip_effect.addItem(label, value)
         apply_button = QPushButton("Aplicar ao clipe")
         apply_button.clicked.connect(self._emit_clip_update)
         form.addRow(self.clip_label)
@@ -64,6 +71,10 @@ class PropertiesPanel(QWidget):
         form.addRow("Origem início (ms)", self.clip_source_start)
         form.addRow("Origem fim (ms)", self.clip_source_end)
         form.addRow("Transição (ms)", self.clip_transition)
+        form.addRow("Velocidade", self.clip_speed)
+        form.addRow("Fade entrada (ms)", self.clip_fade_in)
+        form.addRow("Fade saída (ms)", self.clip_fade_out)
+        form.addRow("Efeito", self.clip_effect)
         form.addRow(apply_button)
         self.tabs.addTab(page, "Corte")
 
@@ -81,6 +92,8 @@ class PropertiesPanel(QWidget):
         self.layer_visible = QCheckBox("Camada visível")
         apply_button = QPushButton("Aplicar à camada")
         apply_button.clicked.connect(self._emit_layer_update)
+        keyframe_button = QPushButton("Adicionar keyframe no cursor")
+        keyframe_button.clicked.connect(self.layer_keyframe_requested)
         form.addRow(self.layer_label)
         form.addRow("Texto", self.layer_text)
         form.addRow("Fonte", self.layer_font)
@@ -92,6 +105,7 @@ class PropertiesPanel(QWidget):
         form.addRow("Opacidade", self.layer_opacity)
         form.addRow(self.layer_visible)
         form.addRow(apply_button)
+        form.addRow(keyframe_button)
         self.tabs.addTab(page, "Camada")
 
     def _create_reframe_tab(self) -> None:
@@ -242,6 +256,10 @@ class PropertiesPanel(QWidget):
         self.clip_source_start.setValue(clip.source_start_ms)
         self.clip_source_end.setValue(clip.source_end_ms)
         self.clip_transition.setValue(clip.transition_ms)
+        self.clip_speed.setValue(clip.speed)
+        self.clip_fade_in.setValue(clip.fade_in_ms)
+        self.clip_fade_out.setValue(clip.fade_out_ms)
+        self.clip_effect.setCurrentIndex(max(0, self.clip_effect.findData(clip.effect)))
 
     def set_selected_layer(self, layer: LayerItem | None) -> None:
         self.selected_layer = layer
@@ -323,6 +341,10 @@ class PropertiesPanel(QWidget):
                     "source_start_ms": self.clip_source_start.value(),
                     "source_end_ms": self.clip_source_end.value(),
                     "transition_ms": self.clip_transition.value(),
+                    "speed": self.clip_speed.value(),
+                    "fade_in_ms": self.clip_fade_in.value(),
+                    "fade_out_ms": self.clip_fade_out.value(),
+                    "effect": self.clip_effect.currentData(),
                 }
             )
 

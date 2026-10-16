@@ -129,6 +129,25 @@ def _drawtext_font_option(font_name: str) -> str:
     return f"font='{_escape_drawtext(font_name or 'Arial')}'"
 
 
+def _layer_keyframe_expression(layer: LayerItem, attribute: str, default: float) -> str:
+    """Build a compact FFmpeg expression for a layer property animated over time."""
+    points = sorted(layer.keyframes, key=lambda item: item.timestamp_ms)
+    if not points:
+        return f"{default:.4f}"
+    expression = f"{getattr(points[-1], attribute):.4f}"
+    for current, following in reversed(list(zip(points, points[1:]))):
+        start = current.timestamp_ms / 1000
+        end = following.timestamp_ms / 1000
+        start_value = float(getattr(current, attribute))
+        end_value = float(getattr(following, attribute))
+        duration = max(0.001, end - start)
+        expression = (
+            f"if(lt(t\\,{end:.3f})\\,{start_value:.4f}+"
+            f"({end_value - start_value:.4f})*(t-{start:.3f})/{duration:.3f}\\,{expression})"
+        )
+    return expression
+
+
 def output_dimensions(
     settings: ExportSettings,
     reframe: ReframeSettings | None = None,
@@ -239,6 +258,8 @@ def build_timeline_render_command(
             f"trim=start={clip_item.source_start_ms / 1000:.3f}:end={clip_item.source_end_ms / 1000:.3f}",
             "setpts=PTS-STARTPTS",
         ]
+        if clip_item.speed != 1:
+            chain.append(f"setpts=PTS/{clip_item.speed:.6f}")
         motion_crop = build_motion_crop_filter(effective_keyframes, source_clip)
         if motion_crop:
             chain.append(motion_crop)
@@ -249,16 +270,21 @@ def build_timeline_render_command(
                 "setsar=1",
             )
         )
-        if clip_item.transition_ms:
-            transition = min(clip_item.transition_ms, clip_item.duration_ms) / 1000
-            fade_out = max(0.0, clip_item.duration_ms / 1000 - transition)
-            chain.extend(
-                (
-                    "format=yuva420p",
-                    f"fade=t=in:st=0:d={transition:.3f}:alpha=1",
-                    f"fade=t=out:st={fade_out:.3f}:d={transition:.3f}:alpha=1",
-                )
-            )
+        fade_in = max(clip_item.fade_in_ms, clip_item.transition_ms) / 1000
+        fade_out = clip_item.fade_out_ms / 1000
+        if fade_in or fade_out:
+            chain.append("format=yuva420p")
+            if fade_in:
+                chain.append(f"fade=t=in:st=0:d={min(fade_in, clip_item.duration_ms / 1000):.3f}:alpha=1")
+            if fade_out:
+                start = max(0.0, clip_item.duration_ms / 1000 - fade_out)
+                chain.append(f"fade=t=out:st={start:.3f}:d={fade_out:.3f}:alpha=1")
+        if clip_item.effect == "blur":
+            chain.append("boxblur=2:1")
+        elif clip_item.effect == "grayscale":
+            chain.append("hue=s=0")
+        elif clip_item.effect == "vintage":
+            chain.append("eq=contrast=1.08:saturation=0.78:brightness=0.03")
         chain.append(f"setpts=PTS+{clip_item.timeline_start_ms / 1000:.3f}/TB")
         filters.append(f"[{input_label}]" + ",".join(chain) + f"[vclip{index}]")
         start = clip_item.timeline_start_ms / 1000
@@ -290,12 +316,15 @@ def build_timeline_render_command(
     for index, layer in enumerate(image_layers):
         width_px = max(2, round(width * layer.width_percent / 100))
         height_px = max(2, round(height * layer.height_percent / 100))
+        opacity = _layer_keyframe_expression(layer, "opacity", layer.opacity)
         filters.append(
             f"[{image_input_start + index}:v]format=rgba,scale={width_px}:{height_px},"
-            f"colorchannelmixer=aa={layer.opacity:.3f}[layerimg{index}]"
+            f"colorchannelmixer=aa='{opacity}'[layerimg{index}]"
         )
-        x = f"(W-w)*{layer.x_percent / 100:.4f}"
-        y = f"(H-h)*{layer.y_percent / 100:.4f}"
+        x_value = _layer_keyframe_expression(layer, "x_percent", layer.x_percent)
+        y_value = _layer_keyframe_expression(layer, "y_percent", layer.y_percent)
+        x = f"(W-w)*({x_value})/100"
+        y = f"(H-h)*({y_value})/100"
         start = layer.timeline_start_ms / 1000
         end = layer.timeline_end_ms / 1000
         filters.append(
@@ -311,15 +340,18 @@ def build_timeline_render_command(
     for index, layer in enumerate(text_layers):
         text = _escape_drawtext(layer.text)
         color = layer.color.lstrip("#") or "FFFFFF"
-        x = f"(w-text_w)*{layer.x_percent / 100:.4f}"
-        y = f"(h-text_h)*{layer.y_percent / 100:.4f}"
+        x_value = _layer_keyframe_expression(layer, "x_percent", layer.x_percent)
+        y_value = _layer_keyframe_expression(layer, "y_percent", layer.y_percent)
+        opacity = _layer_keyframe_expression(layer, "opacity", layer.opacity)
+        x = f"(w-text_w)*({x_value})/100"
+        y = f"(h-text_h)*({y_value})/100"
         start = layer.timeline_start_ms / 1000
         end = layer.timeline_end_ms / 1000
         font_option = _drawtext_font_option(layer.font_name)
         background = ":box=1:boxcolor=black@0.45:boxborderw=14" if layer.background else ""
         filters.append(
             f"[{final_video}]drawtext={font_option}:text='{text}':"
-            f"fontcolor=0x{color}@{layer.opacity:.3f}:fontsize={max(8, layer.font_size)}:"
+            f"fontcolor=0x{color}@'{opacity}':fontsize={max(8, layer.font_size)}:"
             f"x='{x}':y='{y}':enable='between(t,{start:.3f},{end:.3f})'{background}[textout{index}]"
         )
         final_video = f"textout{index}"
@@ -345,15 +377,15 @@ def build_timeline_render_command(
                 f"atrim=start={clip_item.source_start_ms / 1000:.3f}:end={clip_item.source_end_ms / 1000:.3f}",
                 "asetpts=PTS-STARTPTS",
             ]
-            if clip_item.transition_ms:
-                transition = min(clip_item.transition_ms, clip_item.duration_ms) / 1000
-                fade_out = max(0.0, clip_item.duration_ms / 1000 - transition)
-                chain.extend(
-                    (
-                        f"afade=t=in:st=0:d={transition:.3f}",
-                        f"afade=t=out:st={fade_out:.3f}:d={transition:.3f}",
-                    )
-                )
+            if clip_item.speed != 1:
+                chain.extend(_atempo_filters(clip_item.speed))
+            fade_in = max(clip_item.fade_in_ms, clip_item.transition_ms) / 1000
+            fade_out = clip_item.fade_out_ms / 1000
+            if fade_in:
+                chain.append(f"afade=t=in:st=0:d={min(fade_in, clip_item.duration_ms / 1000):.3f}")
+            if fade_out:
+                start = max(0.0, clip_item.duration_ms / 1000 - fade_out)
+                chain.append(f"afade=t=out:st={start:.3f}:d={fade_out:.3f}")
             if clip_item.timeline_start_ms:
                 chain.append(f"adelay={clip_item.timeline_start_ms}|{clip_item.timeline_start_ms}")
             filters.append(f"[{input_label}]" + ",".join(chain) + f"[aclip{index}]")
@@ -396,6 +428,21 @@ def build_timeline_render_command(
         "-progress", "pipe:1", str(destination.resolve()),
     ]
     return command
+
+
+def _atempo_filters(speed: float) -> list[str]:
+    """Represent any supported speed using FFmpeg's 0.5–2.0 atempo range."""
+    remaining = speed
+    filters: list[str] = []
+    while remaining > 2:
+        filters.append("atempo=2.0")
+        remaining /= 2
+    while remaining < 0.5:
+        filters.append("atempo=0.5")
+        remaining /= 0.5
+    if abs(remaining - 1) > 0.001:
+        filters.append(f"atempo={remaining:.6f}")
+    return filters
 
 
 def build_motion_crop_filter(

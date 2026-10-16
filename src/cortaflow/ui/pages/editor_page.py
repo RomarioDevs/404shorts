@@ -1,9 +1,11 @@
 """Basic, responsive player/editor page."""
+import json
+from uuid import uuid4
 
 from pathlib import Path
 
 from PySide6.QtCore import QThreadPool, QUrl, Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut, QUndoCommand, QUndoStack
+from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, QUndoCommand, QUndoStack
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -23,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from cortaflow.domain.clip import ClipRange, format_timestamp
-from cortaflow.domain.editing import LayerItem, SequenceDocument, TimelineClip
+from cortaflow.domain.editing import LayerItem, SequenceDocument, TimelineClip, TransformKeyframe
 from cortaflow.domain.project import ReframeKeyframe
 from cortaflow.domain.tracking import CropFrame
 from cortaflow.services.editor_operations import (
@@ -33,7 +35,9 @@ from cortaflow.services.editor_operations import (
     snap_position,
     split_at,
     trim_clip,
+    update_clip_properties,
 )
+from cortaflow.services.media_previews import build_media_preview_data
 from cortaflow.services.sequence_operations import create_image_layer, create_text_layer, update_layer
 from cortaflow.services.transcoder import export_clip
 from cortaflow.ui.widgets.timeline import TimelineWidget
@@ -97,6 +101,7 @@ class EditorPage(QWidget):
         self.reframe_keyframes: list[ReframeKeyframe] = []
         self.undo_stack = QUndoStack(self)
         self.export_worker: FunctionWorker | None = None
+        self.preview_worker: FunctionWorker | None = None
         self.thread_pool = QThreadPool.globalInstance()
 
         self.player = QMediaPlayer(self)
@@ -213,18 +218,23 @@ class EditorPage(QWidget):
         self.mark_in_button = self._control_button("Entrada (I)", self.mark_in)
         self.mark_out_button = self._control_button("Saída (O)", self.mark_out)
         self.export_button = self._control_button("Exportar", self.export_selection)
+        self.preview_button = self._control_button("Prévia vertical", self.sequence_export_requested.emit)
+        self.preview_button.setToolTip("Abrir a prévia composta com legendas, camadas e reenquadramento")
         self.add_text_button = self._control_button("+ Texto", self.add_text_layer)
         self.add_image_button = self._control_button("+ Imagem", self.add_image_layer)
         self.delete_layer_button = self._control_button("Excluir", self.delete_selected_layer)
         self.delete_layer_button.setEnabled(False)
+        self.duplicate_button = self._control_button("Duplicar", self.duplicate_selected_clips)
         self.cancel_export_button = self._control_button("Cancelar", self.cancel_export)
         self.cancel_export_button.setEnabled(False)
         marker_row.addWidget(self.mark_in_button)
         marker_row.addWidget(self.mark_out_button)
         marker_row.addWidget(self.export_button)
+        marker_row.addWidget(self.preview_button)
         marker_row.addWidget(self.add_text_button)
         marker_row.addWidget(self.add_image_button)
         marker_row.addWidget(self.delete_layer_button)
+        marker_row.addWidget(self.duplicate_button)
         marker_row.addWidget(self.cancel_export_button)
         marker_row.addStretch()
         layout.addLayout(marker_row)
@@ -269,6 +279,7 @@ class EditorPage(QWidget):
         self.properties.settings_changed.connect(self._properties_changed)
         self.properties.clip_update_requested.connect(self._update_clip_properties)
         self.properties.manual_keyframe_requested.connect(self.add_manual_keyframe)
+        self.properties.layer_keyframe_requested.connect(self.add_layer_keyframe)
         self.properties.layer_update_requested.connect(self._update_layer_properties)
         properties_column = QWidget()
         properties_column.setObjectName("propertiesColumn")
@@ -300,6 +311,9 @@ class EditorPage(QWidget):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt virtual method
         """Release native multimedia objects before their video widget disappears."""
+        if self.preview_worker is not None:
+            self.preview_worker.cancel()
+            self.preview_worker = None
         self.player.stop()
         self.player.setSource(QUrl())
         self.player.setVideoOutput(None)
@@ -352,6 +366,9 @@ class EditorPage(QWidget):
             ("F11", self.toggle_fullscreen),
             ("S", self.split_at_cursor),
             ("Delete", self.delete_selected_clip),
+            ("Ctrl+C", self.copy_selected_clips),
+            ("Ctrl+V", self.paste_clips),
+            ("Ctrl+D", self.duplicate_selected_clips),
             ("Ctrl+Z", self.undo_stack.undo),
             ("Ctrl+Shift+Z", self.undo_stack.redo),
         )
@@ -488,6 +505,62 @@ class EditorPage(QWidget):
         self.selected_clip_ids.clear()
         self.properties.set_selected_clip(None)
 
+    def _selected_clip_items(self) -> list[TimelineClip]:
+        ids = set(self.selected_clip_ids)
+        if not ids and self.selected_clip_id:
+            ids.add(self.selected_clip_id)
+        return [clip for clip in self.timeline_clips if clip.clip_id in ids]
+
+    def copy_selected_clips(self) -> None:
+        selected = self._selected_clip_items()
+        if not selected:
+            return
+        anchor = min(item.timeline_start_ms for item in selected)
+        payload = []
+        for item in selected:
+            data = item.model_dump(mode="json")
+            data["timeline_start_ms"] = item.timeline_start_ms - anchor
+            payload.append(data)
+        QGuiApplication.clipboard().setText(json.dumps({"cortaflow_clips": payload}, ensure_ascii=False))
+        self.status_label.setText(f"{len(selected)} clipe(s) copiado(s).")
+
+    def paste_clips(self) -> None:
+        try:
+            payload = json.loads(QGuiApplication.clipboard().text())
+            raw_clips = payload["cortaflow_clips"]
+            pasted = []
+            for raw in raw_clips:
+                raw["clip_id"] = f"paste-{uuid4().hex[:12]}"
+                raw["timeline_start_ms"] = self.player.position() + int(raw["timeline_start_ms"])
+                pasted.append(TimelineClip.model_validate(raw))
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+            self.status_label.setText("A área de transferência não contém clipes do CortaFlow.")
+            return
+        updated = self.timeline_clips + pasted
+        self.undo_stack.push(TimelineStateCommand(self, self.timeline_clips, updated, "Colar clipes"))
+        self.selected_clip_ids = {item.clip_id for item in pasted}
+        self.selected_clip_id = pasted[-1].clip_id
+
+    def duplicate_selected_clips(self) -> None:
+        selected = self._selected_clip_items()
+        if not selected:
+            return
+        offset = max(item.timeline_end_ms for item in selected) - min(item.timeline_start_ms for item in selected) + 100
+        anchor = min(item.timeline_start_ms for item in selected)
+        duplicates = [
+            item.model_copy(
+                update={
+                    "clip_id": f"copy-{uuid4().hex[:12]}",
+                    "timeline_start_ms": item.timeline_start_ms + offset,
+                }
+            )
+            for item in selected
+        ]
+        updated = self.timeline_clips + duplicates
+        self.undo_stack.push(TimelineStateCommand(self, self.timeline_clips, updated, "Duplicar clipes"))
+        self.selected_clip_ids = {item.clip_id for item in duplicates}
+        self.selected_clip_id = duplicates[-1].clip_id
+
     def move_selected_clip(self, clip_id: str, timeline_start_ms: int) -> None:
         try:
             timeline_start_ms = snap_position(self.timeline_clips, clip_id, timeline_start_ms)
@@ -537,6 +610,14 @@ class EditorPage(QWidget):
                 payload["source_end_ms"],
             )
             updated = set_transition(updated, payload["clip_id"], payload["transition_ms"])
+            updated = update_clip_properties(
+                updated,
+                payload["clip_id"],
+                speed=payload["speed"],
+                fade_in_ms=payload["fade_in_ms"],
+                fade_out_ms=payload["fade_out_ms"],
+                effect=payload["effect"],
+            )
         except ValueError as exc:
             QMessageBox.warning(self, "Edição inválida", str(exc))
             return
@@ -655,6 +736,29 @@ class EditorPage(QWidget):
             return
         self.undo_stack.push(LayerStateCommand(self, self.layers, updated.layers, "Editar camada"))
 
+    def add_layer_keyframe(self) -> None:
+        if not self.selected_layer_id:
+            self.status_label.setText("Selecione uma camada para adicionar um keyframe.")
+            return
+        layer = next((item for item in self.layers if item.item_id == self.selected_layer_id), None)
+        if layer is None:
+            return
+        timestamp = self.player.position()
+        keyframe = TransformKeyframe(
+            timestamp_ms=timestamp,
+            x_percent=self.properties.layer_x.value(),
+            y_percent=self.properties.layer_y.value(),
+            opacity=self.properties.layer_opacity.value(),
+        )
+        keyframes = [item for item in layer.keyframes if item.timestamp_ms != timestamp]
+        keyframes.append(keyframe)
+        keyframes.sort(key=lambda item: item.timestamp_ms)
+        sequence = self.sequence or SequenceDocument(
+            sequence_id="editor-draft", name="Rascunho", clips=list(self.timeline_clips), layers=self.layers
+        )
+        updated = update_layer(sequence, layer.item_id, keyframes=keyframes)
+        self.undo_stack.push(LayerStateCommand(self, self.layers, updated.layers, "Adicionar keyframe"))
+
     def add_manual_keyframe(self) -> None:
         if not self.source_width or not self.source_height:
             return
@@ -721,6 +825,20 @@ class EditorPage(QWidget):
 
     def _duration_changed(self, duration: int) -> None:
         self.time_label.setText(f"{format_timestamp(self.player.position())} / {format_timestamp(duration)}")
+        if self.source_path and duration > 0 and self.preview_worker is None:
+            worker = FunctionWorker(build_media_preview_data, self.source_path, duration)
+            worker.signals.finished.connect(self._media_preview_finished)
+            worker.signals.failed.connect(lambda message: self.status_label.setText(f"Preview da timeline indisponível: {message}"))
+            self.preview_worker = worker
+            self.thread_pool.start(worker)
+
+    def _media_preview_finished(self, payload: object) -> None:
+        self.preview_worker = None
+        if isinstance(payload, dict):
+            self.timeline.canvas.set_media_previews(
+                list(payload.get("thumbnails", [])),
+                list(payload.get("waveform", [])),
+            )
 
     def _playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
         text = "Pausar" if state == QMediaPlayer.PlaybackState.PlayingState else "Reproduzir"
